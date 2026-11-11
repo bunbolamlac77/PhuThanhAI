@@ -65,7 +65,7 @@ def _max_rss_kb(stderr: str) -> int | None:
     for line in stderr.splitlines():
         if "maximum resident set size" in line:
             try:
-                return int(line.split()[0])
+                return int(int(line.split()[0]) / 1024)
             except ValueError:
                 return None
         if "peak memory footprint" in line:
