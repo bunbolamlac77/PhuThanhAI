@@ -2,8 +2,8 @@
 
 Local-first, offline video library / analyzer for macOS Apple Silicon.
 
-This repository is being built milestone by milestone. **Current state: S02 (PTS timeline, scene scan, adaptive sampling).**
-The VLM evidence layer and report assembly are S03–S04; the POV tab stays locked until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
+This repository is being built milestone by milestone. **Current state: S03 (Qwen3-VL offline inference, scheduler, visual evidence).**
+Report assembly/context fusion is S04; the POV tab stays locked until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
 
 ## Layout
 
@@ -24,6 +24,9 @@ src/phuthanhai/                 application package
     scene_scan.py               full-timeline cuts, dark/blur/motion cues, segments
     sampling.py                 deterministic quick/detailed/thorough plans
     sampling_pipeline.py        cache, checkpoints, resume, cancel, provenance
+    vision_service.py           heavy slot, worker lifecycle, inference cache, evidence
+    evidence.py                 VisualEvidenceSet validation (frame refs only)
+    vlm_worker.py               isolated Qwen3-VL subprocess protocol (JSONL v2)
   library/
     db.py                       SQLite WAL registry + migrations
     store.py                    assets/annotations/reviews/cache repositories
@@ -58,6 +61,8 @@ PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s01_gate.py              # regenerate artifacts/qa/S01 evidence
 PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s02_gate.py              # regenerate artifacts/qa/S02 evidence
+PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
+  python3 tools/run_s03_gate.py              # regenerate artifacts/qa/S03 evidence (real inference)
 ```
 
 ## Environment separation (non-negotiable)
@@ -148,16 +153,37 @@ Evidence is local-only in `artifacts/qa/S02/`.
 | Resources | pipeline peak RSS 43 MiB; sampling cache 0.45 MiB (fixtures) + 1.3 MiB (real); gate 147 s wall, 232 s child CPU |
 | UI regression | notes/wall-clock/flush + Space/J/K/L/I/O + textarea suppression all PASS in Chrome |
 
-## Known limitations (S00–S02)
+## S03 gate result on this machine (2026-11-11)
 
-- **Video Analyzer inference is not implemented yet**: S02 prepares verified frames; Qwen3-VL evidence and reports are S03–S04. No model is loaded while using the library or sampling.
+`PHUTHANHAI_TEST_FOOTAGE=<real footage> python3 tools/run_s03_gate.py` → **verdict PASS**
+(11/11 steps, owner-confirmed frame QA). Evidence stays local in `artifacts/qa/S03/`.
+
+| Fact | Measured value |
+|---|---|
+| Tests | 271 passed, 0 failed, 0 skipped |
+| Runtime | Python 3.12.11 · mlx 0.32.4 · mlx-vlm 0.7.10 · mlx-lm 0.32.2 · transformers 4.57.6 |
+| Real inference | 4-frame sequential, 4/4 observed, coverage sufficient, 28.0 s |
+| Benchmark | 1 frame 10.8 s · 2 frames 15.6 s · 4 frames 27.3 s, all schema-valid |
+| Multi-frame | **disabled**: 2-image request runs but output fails strict JSON validation → `sequential_frames` fallback |
+| Memory | worker peak RSS 1.93 GiB · MLX peak 3.91 GiB · swap delta 0.03 GiB on the final run |
+| Scheduler | max concurrent heavy workers = 1; no second scheduler introduced |
+| Recovery | crash after 1 committed frame → resume to 3 unique observed frames; cancel reaped with 0 leftovers |
+| P0 fixes | corrupt JPEG, same-size/same-mtime source replacement, execution vs coverage split: 7 dedicated tests |
+| Offline | worker launched under `sandbox-exec` `(deny network*)` + in-process socket block; model loaded from local snapshot |
+| UI safety | notes created while real inference was running; S01 note/shortcut E2E still PASS |
+
+## Known limitations (S00–S03)
+
+- **Video Analyzer report assembly is not implemented**: S03 produces a validated `VisualEvidenceSet`; context fusion, events and reports are S04. No user note is mixed into the visual prompt.
 - **POV** is hard-locked until G0–G5 pass (`POV_LOCKED_UNTIL_G5`).
-- **Negative start PTS**: the normalization path is unit-tested with a synthetic negative origin, but this FFmpeg build rewrites negative timestamps when muxing, so no physical negative-start fixture could be produced. Non-zero and B-frame reordering fixtures are real.
-- **Cancel granularity**: cancellation is cooperative between frame extractions; a long scene-scan FFmpeg pass cannot be interrupted mid-pass (it is bounded by a timeout). The process is always reaped.
-- **CPU/RSS metrics** cover the Python pipeline process. Short-lived FFmpeg children are not RSS-sampled; CPU time for children is reported separately by the gate.
-- Tags are review labels with a filter and editor; **collections/playlists** are not implemented.
-- ProRes is generated and sampled in the fixture matrix; **ProRes playback in the browser** was not verified.
-- Browser E2E uses headless Chrome (GPU enabled for HEVC); **WKWebView is still not exercised**, and `.app`/Spotlight remain S05.
-- The macOS launcher is a compiling SwiftPM scaffold (`Mach-O arm64`). `swift build` fails on this machine because the Command Line Tools `swift-package` binary aborts with a `dyld` symbol error, and the default `MacOSX27.0.sdk` needs Swift 6.4 while the installed compiler is 6.3.3; the scaffold is built with `swiftc` against `MacOSX26.5.sdk`.
-- `mlx-vlm` on this machine is **0.7.10**, while `docs/00_MASTER_ARCH.md` mentions 0.7.12. The installed version is what `doctor` reports and what the S00 smoke test exercised.
-- The repository is linked to `github.com/bunbolamlac77/PhuThanhAI`; QA evidence and private-footage paths stay out of git (`artifacts/qa/` is ignored).
+- **Multi-frame is disabled by evidence, not by preference**: `mlx-vlm 0.7.10` accepts multiple images, but the returned object failed the strict observation schema in every gate attempt. Multi-frame requests fall back to `sequential_frames`; the method name is never rewritten to `multi_frame`.
+- **Human content QA is a single owner-confirmed frame**, not a broad accuracy study. Other observations carry model uncertainty and are not independently verified.
+- **Memory numbers vary with desktop load** (browsers, this session). Swap delta changed between runs (0.03–0.38 GiB) because saturated swap was already in use; inference memory is reported separately from machine-wide swap.
+- **ResourceGovernor thresholds were recalibrated from measured runs** (4.1 GiB MLX peak completed at ~66% free memory). They remain provisional and are not a guarantee under all desktop workloads.
+- **No confidence numbers** are produced: the runtime exposes no calibrated probability, and fabricated confidence is rejected.
+- **Cancel granularity**: cancellation kills the worker process group (SIGTERM → SIGKILL → wait), but a single `generate()` call cannot be interrupted mid-token; the gate measures the resulting stop time.
+- **Negative start PTS** remains synthetic-only (FFmpeg rewrites negative timestamps); VFR/B-frames/non-zero fixtures are real.
+- **ProRes** is sampled in the fixture matrix but browser playback of ProRes was not verified.
+- **WKWebView/`.app`/Spotlight** remain S05; `swift build` still fails on this machine, so the launcher scaffold is compiled with `swiftc` against `MacOSX26.5.sdk`.
+- **Offline proof** is macOS `sandbox-exec` + in-process socket denial for the worker. The FastAPI process itself binds loopback only; there is no outbound model download path.
+- `artifacts/qa/` and real-footage paths stay out of git. The public repo contains source, tests, tools and docs only.

@@ -1036,3 +1036,83 @@ input:focus-visible,
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* ---------- S03 visual evidence ---------- */
+.vision {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+
+.vision__head,
+.vision__controls,
+.vision__stats {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.vision__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vision__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.vision__warnings {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--amber);
+  font-size: 11px;
+}
+
+.vision__evidence summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.evidence-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.evidence-list li {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+}
+
+.evidence-list li p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.evidence-list__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.evidence--unknown {
+  border-color: #6d2028;
+}

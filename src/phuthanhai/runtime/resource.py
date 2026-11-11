@@ -25,10 +25,15 @@ _SWAP = re.compile(r"total = ([\d.]+)M\s+used = ([\d.]+)M\s+free = ([\d.]+)M")
 class Thresholds:
     """Provisional policy thresholds (bytes are fractions of physical RAM)."""
 
-    pressured_available_ratio: float = 0.18
-    critical_available_ratio: float = 0.08
-    pressured_swap_ratio: float = 0.10
-    critical_swap_ratio: float = 0.30
+    # Calibrated against measured S00/S03 runs on this 16 GiB M1 Pro: a 4.1 GiB
+    # MLX peak completed with ~66% free memory and 2.7 GiB swap in use. The earlier
+    # 10%/30% swap thresholds refused every inference on a normal desktop workload.
+    pressured_available_ratio: float = 0.12
+    critical_available_ratio: float = 0.05
+    pressured_swap_ratio: float = 0.75
+    critical_swap_ratio: float = 0.90
+    critical_pressure_free_pct: float = 10.0
+    pressured_pressure_free_pct: float = 30.0
     min_free_disk_bytes: int = 5 * 1024**3
     provisional: bool = field(default=True)
 
@@ -176,6 +181,15 @@ def snapshot(path: Path | None = None) -> ResourceSnapshot:
         else:
             level = "normal"
 
+    # macOS's own free-memory percentage is the primary pressure signal when present.
+    if pressure_pct is not None:
+        if pressure_pct < THRESHOLDS.critical_pressure_free_pct:
+            level = "critical"
+            reasons.append(f"memory pressure free {pressure_pct:.0f}% < {THRESHOLDS.critical_pressure_free_pct:.0f}%")
+        elif pressure_pct < THRESHOLDS.pressured_pressure_free_pct and level == "normal":
+            level = "pressured"
+            reasons.append(f"memory pressure free {pressure_pct:.0f}% < {THRESHOLDS.pressured_pressure_free_pct:.0f}%")
+
     if swap and swap[1] > 0:
         swap_ratio = swap[0] / swap[1]
         if swap_ratio >= THRESHOLDS.critical_swap_ratio:
@@ -218,6 +232,10 @@ class ResourceGovernor:
             return False, "STORAGE_FULL"
         if current.level == "critical":
             return False, "MEMORY_CRITICAL"
+        if current.available_bytes is not None and current.available_bytes < 1536 * 1024**2:
+            return False, "MEMORY_CRITICAL"
+        if current.level == "pressured":
+            return True, "MEMORY_PRESSURED"
         return True, "OK"
 
 

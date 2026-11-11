@@ -16,6 +16,7 @@ from typing import Any
 
 from phuthanhai.analyzer.sampling import PROFILE_GAPS_MS
 from phuthanhai.analyzer.sampling_pipeline import SamplingError, SamplingPipeline
+from phuthanhai.analyzer.vision_service import VisionError, VisionService
 from phuthanhai.config import Settings
 from phuthanhai.library import notes as note_rules
 from phuthanhai.library import store
@@ -41,6 +42,7 @@ class LibraryService:
             quota_bytes=quota,
         )
         self.pipeline = SamplingPipeline(self.db, settings.data.sampling)
+        self.vision = VisionService(self.db, settings)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sampling")
         self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
@@ -294,6 +296,12 @@ class LibraryService:
     def start_sampling(self, asset_id: str, profile: str = "detailed") -> dict[str, Any]:
         if profile not in PROFILE_GAPS_MS:
             raise store.StoreError("SAMPLING_PROFILE_INVALID", f"unknown profile: {profile}")
+        from phuthanhai.runtime.scheduler import HEAVY_SLOT
+
+        if HEAVY_SLOT.busy:
+            raise store.StoreError(
+                "RESOURCE_BUSY", "a heavy AI worker is running; sampling is paused to protect memory", status=409
+            )
         asset, path = self.resolve_asset_file(asset_id)
         with self._jobs_lock:
             for handle in self._jobs.values():
@@ -311,6 +319,7 @@ class LibraryService:
                 profile=profile,
                 fingerprint=asset.get("sampling_fingerprint"),
                 sampled_at=asset.get("sampled_at"),
+                coverage=asset.get("sampling_coverage"),
             )
         cancel_event = threading.Event()
         future = self._executor.submit(self._run_sampling_job, job_id, asset, path, profile, cancel_event)
@@ -353,6 +362,7 @@ class LibraryService:
                     profile=profile,
                     fingerprint=asset.get("sampling_fingerprint"),
                     sampled_at=asset.get("sampled_at"),
+                    coverage=asset.get("sampling_coverage"),
                 )
             outcome = self.pipeline.run(asset, path, profile=profile, progress=progress, cancel=cancel)
             with self.db.write() as conn:
@@ -366,6 +376,7 @@ class LibraryService:
                 store.set_sampling_state(
                     conn, asset["asset_id"], status="failed", profile=profile,
                     fingerprint=asset.get("sampling_fingerprint"), sampled_at=asset.get("sampled_at"),
+                    coverage="unknown",
                 )
         except Exception as exc:  # noqa: BLE001 - always record a stable code
             code = getattr(exc, "code", "SAMPLING_FAILED")
@@ -374,20 +385,14 @@ class LibraryService:
                 store.set_sampling_state(
                     conn, asset["asset_id"], status="failed", profile=profile,
                     fingerprint=asset.get("sampling_fingerprint"), sampled_at=asset.get("sampled_at"),
+                    coverage="unknown",
                 )
         finally:
             with self._jobs_lock:
                 self._jobs.pop(job_id, None)
 
     def cancel_sampling(self, job_id: str) -> dict[str, Any]:
-        with self._jobs_lock:
-            handle = self._jobs.get(job_id)
-        if handle is None:
-            return self.get_job(job_id)
-        handle["cancel"].set()
-        with self.db.write() as conn:
-            store.update_job(conn, job_id, state="cancelling")
-        return self.get_job(job_id)
+        return self.cancel_job(job_id)
 
     def get_job(self, job_id: str) -> dict[str, Any]:
         with self.db.read() as conn:
@@ -413,12 +418,15 @@ class LibraryService:
             "sampling_status": asset.get("sampling_status", "not_sampled"),
             "sampling_profile": asset.get("sampling_profile"),
             "sampled_at": asset.get("sampled_at"),
+            "coverage_status": asset.get("sampling_coverage"),
             "fingerprint": fingerprint,
             "manifest": None
             if manifest is None
             else {
                 "frame_count": len(manifest.get("frames", [])),
                 "scene_count": len(manifest.get("segments", [])),
+                "execution_status": manifest.get("execution_status"),
+                "coverage_status": manifest.get("coverage_status"),
                 "observed_max_gap_ms": manifest.get("observed_max_gap_ms"),
                 "expected_max_gap_ms": manifest.get("expected_max_gap_ms"),
                 "coverage": manifest.get("coverage"),
@@ -439,6 +447,131 @@ class LibraryService:
                     for frame in manifest.get("frames", [])
                 ],
             },
+        }
+
+    # -- visual analysis --------------------------------------------------- #
+    def start_analysis(self, asset_id: str, method: str = "auto") -> dict[str, Any]:
+        if method not in {"auto", "single_frame", "sequential_frames", "multi_frame"}:
+            raise store.StoreError("ANALYSIS_METHOD_INVALID", f"unknown method: {method}")
+        asset, path = self.resolve_asset_file(asset_id)
+        if asset.get("sampling_status") != "complete":
+            raise store.StoreError("SAMPLING_REQUIRED", "run S02 sampling before visual analysis", status=409)
+        with self._jobs_lock:
+            for handle in self._jobs.values():
+                if handle["asset_id"] == asset_id and not handle["future"].done():
+                    raise store.StoreError(
+                        "JOB_ALREADY_RUNNING", "a job is already running for this asset", status=409
+                    )
+        job_id = str(uuid.uuid4())
+        with self.db.write() as conn:
+            store.create_job(conn, job_id=job_id, project_id=asset["project_id"], asset_id=asset_id, kind="visual_analysis")
+            store.set_analysis_state(
+                conn, asset_id, status="queued",
+                analysis_id=asset.get("analysis_id"),
+                fingerprint=asset.get("analysis_fingerprint"),
+                coverage=asset.get("analysis_coverage"),
+            )
+        cancel_event = threading.Event()
+        future = self._executor.submit(self._run_analysis_job, job_id, asset, path, method, cancel_event)
+        with self._jobs_lock:
+            self._jobs[job_id] = {
+                "asset_id": asset_id,
+                "kind": "visual_analysis",
+                "future": future,
+                "cancel": cancel_event,
+                "started": time.monotonic(),
+            }
+        return self.get_job(job_id)
+
+    def _run_analysis_job(
+        self, job_id: str, asset: dict[str, Any], path: Path, method: str, cancel: threading.Event
+    ) -> None:
+        last_update = 0.0
+
+        def progress(payload: dict[str, Any]) -> None:
+            nonlocal last_update
+            now = time.monotonic()
+            if now - last_update < 0.5 and payload.get("fraction", 0) < 1:
+                return
+            last_update = now
+            try:
+                with self.db.write() as conn:
+                    store.update_job(
+                        conn, job_id, state="running",
+                        progress=round(0.05 + 0.9 * float(payload.get("fraction", 0.0)), 3),
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="running", progress=0.02)
+            outcome = self.vision.analyze(
+                asset, path, method=method, progress=progress, cancel=cancel, job_id=job_id
+            )
+            with self.db.write() as conn:
+                state = "cancelled" if outcome.status == "cancelled" else "complete"
+                store.update_job(conn, job_id, state=state, progress=1.0 if state == "complete" else outcome.frames_observed / max(1, outcome.frames_total))
+        except VisionError as exc:
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="failed", error_code=exc.code)
+                store.set_analysis_state(
+                    conn, asset["asset_id"], status="failed",
+                    analysis_id=asset.get("analysis_id"),
+                    fingerprint=asset.get("analysis_fingerprint"),
+                    coverage="unknown",
+                )
+        except Exception as exc:  # noqa: BLE001
+            code = getattr(exc, "code", "ANALYSIS_FAILED")
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="failed", error_code=str(code))
+                store.set_analysis_state(
+                    conn, asset["asset_id"], status="failed",
+                    analysis_id=asset.get("analysis_id"),
+                    fingerprint=asset.get("analysis_fingerprint"),
+                    coverage="unknown",
+                )
+        finally:
+            with self._jobs_lock:
+                self._jobs.pop(job_id, None)
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        with self._jobs_lock:
+            handle = self._jobs.get(job_id)
+        if handle is not None:
+            handle["cancel"].set()
+        with self.db.write() as conn:
+            store.update_job(conn, job_id, state="cancelling")
+        return self.get_job(job_id)
+
+    def analysis_summary(self, asset_id: str) -> dict[str, Any]:
+        asset = self.get_asset(asset_id)
+        evidence = self.vision.load_evidence(asset_id)
+        if evidence is None:
+            return {
+                "asset_id": asset_id,
+                "analysis_status": asset.get("analysis_status", "not_started"),
+                "analysis_id": asset.get("analysis_id"),
+                "coverage_status": asset.get("analysis_coverage"),
+                "method": None,
+                "frames_total": 0,
+                "frames_observed": 0,
+                "frames_unknown": 0,
+                "warnings": [],
+                "evidence": None,
+            }
+        observed = sum(1 for frame in evidence["frames"] if frame["interpretation_level"] == "observed")
+        return {
+            "asset_id": asset_id,
+            "analysis_status": asset.get("analysis_status", "not_started"),
+            "analysis_id": evidence["analysis_id"],
+            "coverage_status": evidence["coverage_status"],
+            "method": evidence["analysis_method"],
+            "frames_total": len(evidence["frames"]),
+            "frames_observed": observed,
+            "frames_unknown": len(evidence["frames"]) - observed,
+            "warnings": evidence.get("warnings", []),
+            "evidence": evidence,
         }
 
     # -- diagnostics ------------------------------------------------------- #

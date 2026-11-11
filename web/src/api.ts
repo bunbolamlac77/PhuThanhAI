@@ -72,6 +72,10 @@ export interface Asset {
   sampling_status: string;
   sampling_profile: string | null;
   sampled_at: string | null;
+  sampling_coverage: string | null;
+  analysis_id: string | null;
+  analysis_coverage: string | null;
+  analysis_updated_at: string | null;
   source_state: string;
   error_code?: string | null;
   size_bytes: number;
@@ -377,6 +381,10 @@ export interface SamplingSummary {
   sampling_status: string;
   sampling_profile: string | null;
   sampled_at: string | null;
+  sampling_coverage: string | null;
+  analysis_id: string | null;
+  analysis_coverage: string | null;
+  analysis_updated_at: string | null;
   fingerprint: string | null;
   manifest: {
     frame_count: number;
@@ -402,4 +410,48 @@ export function cancelJob(jobId: string): Promise<SamplingJob> {
 
 export function fetchSampling(assetId: string): Promise<SamplingSummary> {
   return request<SamplingSummary>(`/assets/${assetId}/sampling`);
+}
+
+
+export type AnalysisMethod = "auto" | "single_frame" | "sequential_frames" | "multi_frame";
+
+export interface AnalysisSummary {
+  asset_id: string;
+  analysis_status: string;
+  analysis_id: string | null;
+  coverage_status: string | null;
+  method: string | null;
+  frames_total: number;
+  frames_observed: number;
+  frames_unknown: number;
+  warnings: string[];
+  evidence: {
+    analysis_method: string;
+    coverage_status: string;
+    prompt_version: string;
+    frames: Array<{
+      frame_id: string;
+      scene_id: string;
+      normalized_pts_ms: number;
+      interpretation_level: "observed" | "hypothesis" | "unknown";
+      observation: {
+        description: string;
+        objects: string[];
+        actions: string[];
+        camera: string | null;
+        lighting: string | null;
+        visible_text: string[];
+        uncertainty: string[];
+      } | null;
+      uncertainty: string[];
+    }>;
+  } | null;
+}
+
+export function startAnalysis(assetId: string, method: AnalysisMethod): Promise<SamplingJob> {
+  return mutate<SamplingJob>(`/assets/${assetId}:analyze`, "POST", { method });
+}
+
+export function fetchAnalysis(assetId: string): Promise<AnalysisSummary> {
+  return request<AnalysisSummary>(`/assets/${assetId}/analysis`);
 }

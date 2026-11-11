@@ -199,7 +199,7 @@ class ResourceTests(unittest.TestCase):
     def test_governor_reports_decision(self) -> None:
         decision, code = GOVERNOR.can_start_heavy_worker()
         self.assertIn(decision, {True, False})
-        self.assertIn(code, {"OK", "STORAGE_FULL", "MEMORY_CRITICAL"})
+        self.assertIn(code, {"OK", "STORAGE_FULL", "MEMORY_CRITICAL", "MEMORY_PRESSURED"})
 
 
 if __name__ == "__main__":

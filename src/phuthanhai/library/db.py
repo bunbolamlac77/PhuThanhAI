@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -185,7 +185,25 @@ def _migration_v2(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_sampling ON assets(project_id, sampling_status)")
 
 
-MIGRATIONS = (_migration_v1, _migration_v2)
+def _migration_v3(conn: sqlite3.Connection) -> None:
+    """S03: coverage is separate from execution success."""
+
+    conn.execute("ALTER TABLE assets ADD COLUMN sampling_coverage TEXT")
+
+
+def _migration_v4(conn: sqlite3.Connection) -> None:
+    """S03: visual analysis identity/coverage on assets."""
+
+    for statement in (
+        "ALTER TABLE assets ADD COLUMN analysis_id TEXT",
+        "ALTER TABLE assets ADD COLUMN analysis_fingerprint TEXT",
+        "ALTER TABLE assets ADD COLUMN analysis_coverage TEXT",
+        "ALTER TABLE assets ADD COLUMN analysis_updated_at TEXT",
+    ):
+        conn.execute(statement)
+
+
+MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4)
 
 
 class Database:

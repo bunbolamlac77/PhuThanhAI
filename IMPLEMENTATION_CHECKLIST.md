@@ -112,6 +112,26 @@ implemented; E2E runs in headless Chrome, not WKWebView.
 **G2 limitations:** negative-start physical fixture unavailable; cancellation cannot interrupt an in-flight FFmpeg
 scan pass (timeout-bounded); CPU/RSS of short-lived FFmpeg children are not RSS-sampled; no model was loaded in S02.
 
+## S03 — Qwen3-VL Offline, Scheduler, Evidence — Gate G3
+
+> **AI-run result on 2026-11-11** (`MacBookPro18,3`, macOS 26.7.1): **G3 PASS (11/11 gate steps, 271 tests, owner-confirmed frame QA)**.
+> Evidence: `artifacts/qa/S03/{gate.md,gate.json,device_metrics.json,vlm_benchmark.json,worker_recovery.json,qa_frame.jpg,qa_observation.json}`.
+> Regenerate: `PHUTHANHAI_TEST_FOOTAGE=<footage> python3 tools/run_s03_gate.py`.
+
+- [x] P0-A frame-cache integrity (path containment, symlink, decode, dimensions, SHA, target refs).
+- [x] P0-B full source SHA verified by reading bytes, not trusting size/mtime; same-size/same-mtime replacement test.
+- [x] P0-C execution status separated from coverage status; insufficient coverage produces warnings and partial evidence.
+- [x] Worker protocol v2: verified frame list, echo-only ids/timestamps, strict observation schema, size caps, seq, stdout/stderr split.
+- [x] Real offline Qwen3-VL inference on 4 sourced frames; 4/4 observed, no fabricated frame/timecode, no confidence numbers.
+- [x] Benchmark 1/2/4 frames (10.8/15.6/27.3 s); multi-image output invalid → sequential fallback.
+- [x] ModelScheduler single `AI_HEAVY` owner, governor check, worker reaped before slot release, bounded retries.
+- [x] Inference cache/checkpoint keyed by source SHA, sampling fingerprint, frame hashes, model snapshot, runtime, prompt and generation settings.
+- [x] Crash after 1 committed frame → resume to 3 unique frames; cancel → 0 leftovers.
+- [x] UI/API progress from committed frames; notes usable during inference; S01 E2E regression PASS.
+
+**G3 limitations:** human QA covered one frame (owner-confirmed); multi-frame disabled; swap/memory varies with desktop load;
+cancel cannot interrupt a single generate call; no calibrated confidence.
+
 ## S03 — Qwen3-VL offline / ModelScheduler — Gate G3
 
 - [ ] VLM subprocess đọc frame path qua validated IPC JSONL, không import MLX trong API/UI.

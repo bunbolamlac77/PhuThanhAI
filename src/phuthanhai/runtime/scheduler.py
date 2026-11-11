@@ -256,6 +256,12 @@ class ProcessRegistry:
             self._children.clear()
         return terminated
 
+    def discard(self, pid: int) -> None:
+        """Forget a child that was waited on outside ``run_captured``."""
+
+        with self._guard:
+            self._children.pop(int(pid), None)
+
     @property
     def active_count(self) -> int:
         with self._guard:

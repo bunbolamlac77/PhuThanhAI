@@ -30,6 +30,8 @@ from phuthanhai.api.schemas import (
     ProxyResponse,
     ReviewOut,
     ReviewUpdate,
+    AnalysisSummary,
+    AnalyzeRequest,
     JobOut,
     SampleRequest,
     SamplingSummary,
@@ -243,6 +245,16 @@ def start_sampling(asset_id: str, payload: SampleRequest, request: Request) -> J
     return JobOut.model_validate(_library(request).start_sampling(asset_id, payload.profile))
 
 
+@router.post("/assets/{asset_id}:analyze", response_model=JobOut, status_code=202)
+def start_analysis(asset_id: str, payload: AnalyzeRequest, request: Request) -> JobOut:
+    return JobOut.model_validate(_library(request).start_analysis(asset_id, payload.method))
+
+
+@router.get("/assets/{asset_id}/analysis", response_model=AnalysisSummary)
+def analysis_summary(asset_id: str, request: Request) -> AnalysisSummary:
+    return AnalysisSummary.model_validate(_library(request).analysis_summary(asset_id))
+
+
 @router.get("/assets/{asset_id}/sampling", response_model=SamplingSummary)
 def sampling_summary(asset_id: str, request: Request) -> SamplingSummary:
     return SamplingSummary.model_validate(_library(request).sampling_summary(asset_id))
@@ -260,7 +272,7 @@ def get_job(job_id: str, request: Request) -> JobOut:
 
 @router.post("/jobs/{job_id}:cancel", response_model=JobOut)
 def cancel_job(job_id: str, request: Request) -> JobOut:
-    return JobOut.model_validate(_library(request).cancel_sampling(job_id))
+    return JobOut.model_validate(_library(request).cancel_job(job_id))
 
 
 # --------------------------------------------------------------------------- #

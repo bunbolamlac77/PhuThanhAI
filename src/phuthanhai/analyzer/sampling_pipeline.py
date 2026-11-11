@@ -48,6 +48,8 @@ from phuthanhai.library import store
 from phuthanhai.library.db import Database
 from phuthanhai.runtime.checkpoint import Checkpoint, CheckpointError, read_checkpoint, write_checkpoint
 from phuthanhai.utils.fs import FsError, atomic_write_json
+from PIL import Image
+
 from phuthanhai.utils.hashes import sha256_file
 
 PIPELINE_VERSION = "s02-pipeline-1"
@@ -78,12 +80,16 @@ class SamplingOutcome:
     cache_hits: int
     elapsed_s: float
     observed_max_gap_ms: int
+    execution_status: str = "complete"
+    coverage_status: str = "unknown"
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "asset_id": self.asset_id,
             "status": self.status,
+            "execution_status": self.execution_status,
+            "coverage_status": self.coverage_status,
             "fingerprint": self.fingerprint,
             "profile": self.profile,
             "extracted": self.extracted,
@@ -91,6 +97,7 @@ class SamplingOutcome:
             "frame_count": len(self.frames),
             "elapsed_s": round(self.elapsed_s, 3),
             "observed_max_gap_ms": self.observed_max_gap_ms,
+            "coverage_status": self.coverage_status,
             "target_max_gap_ms": self.plan.max_gap_ms,
             "scene_count": len(self.segments),
             "warnings": self.warnings,
@@ -142,26 +149,21 @@ class SamplingPipeline:
 
     # -- helpers ----------------------------------------------------------- #
     def _asset_sha(self, asset: dict[str, Any], path: Path) -> str:
-        """Return the content hash, recomputing when the file no longer matches.
+        """Full source SHA-256, verified by reading the bytes every run.
 
-        A cached SHA-256 is only valid while size/mtime still match the registry
-        row; otherwise a replaced file would silently reuse the old fingerprint,
-        cache and scan of different footage.
+        A cached hash is **not** trusted on size/mtime alone: a file can be
+        replaced while preserving both. This is P0-B from the S03 directive -
+        quick stat fingerprints are only used to detect changes *during* a run.
         """
 
         asset_id = asset["asset_id"]
-        stat = path.stat()
-        matches_registry = (
-            int(asset.get("size_bytes", -1)) == stat.st_size
-            and int(asset.get("mtime_ns", -1)) == stat.st_mtime_ns
-        )
+        digest = sha256_file(path)
         with self.db.read() as conn:
             row = conn.execute("SELECT sha256 FROM assets WHERE asset_id = ?", (asset_id,)).fetchone()
-        if row is not None and row["sha256"] and matches_registry:
-            return str(row["sha256"])
-        digest = sha256_file(path)
-        with self.db.write() as conn:
-            store.set_asset_hash(conn, asset_id, digest)
+        stored = str(row["sha256"]) if row is not None and row["sha256"] else None
+        if stored != digest:
+            with self.db.write() as conn:
+                store.set_asset_hash(conn, asset_id, digest)
         return digest
 
     def _cache_dir(self, asset_id: str, fingerprint: str) -> Path:
@@ -192,11 +194,54 @@ class SamplingPipeline:
         except (OSError, ValueError, KeyError):
             return None
 
-    def _frame_is_reusable(self, record: dict[str, Any]) -> bool:
-        image = Path(record.get("path", ""))
-        if not image.is_file() or image.stat().st_size == 0:
+    def _frame_is_reusable(
+        self,
+        record: dict[str, Any],
+        target: FrameTarget,
+        frames_dir: Path,
+        *,
+        max_edge: int,
+        quality: int,
+    ) -> bool:
+        """Strict cache integrity check (P0-A).
+
+        A file with the right name is not enough: it must live inside the frame
+        cache, not be a symlink, decode as an image, match the committed hash and
+        dimensions, and still correspond to the same sampling target/settings.
+        Any failure means the frame is re-extracted (never silently trusted).
+        """
+
+        try:
+            image = Path(record.get("path", ""))
+            if not image.is_file() or image.is_symlink():
+                return False
+            resolved = image.resolve(strict=True)
+            root = frames_dir.resolve()
+            if resolved != root and root not in resolved.parents:
+                return False
+            size = resolved.stat().st_size
+            if size <= 0 or size > 32 * 1024 * 1024:
+                return False
+            if record.get("frame_id") != target.frame_id:
+                return False
+            if record.get("scene_id") != target.scene_id:
+                return False
+            if int(record.get("requested_ms", -1)) != target.requested_ms:
+                return False
+            if int(record.get("max_edge", -1)) != max_edge or int(record.get("quality", -1)) != quality:
+                return False
+            if sha256_file(resolved) != record.get("sha256"):
+                return False
+            with Image.open(resolved) as probe:
+                probe.verify()
+            with Image.open(resolved) as probe:
+                if probe.format not in {"JPEG", "PNG"}:
+                    return False
+                if (probe.width, probe.height) != (int(record.get("width", 0)), int(record.get("height", 0))):
+                    return False
+            return True
+        except Exception:  # noqa: BLE001 - any corrupt cache entry is simply re-extracted
             return False
-        return True
 
     # -- main -------------------------------------------------------------- #
     def run(
@@ -284,7 +329,17 @@ class SamplingPipeline:
             atomic_write_json(cache_dir / "plan.json", plan.to_dict())
 
         # A committed frame must still exist on disk; otherwise re-extract it.
-        committed = {key: value for key, value in committed.items() if self._frame_is_reusable(value)}
+        committed = {
+            key: value
+            for key, value in committed.items()
+            if self._frame_is_reusable(
+                value,
+                next((t for t in plan.targets if t.frame_id == key), FrameTarget(key, "", -1, "", "")),
+                frames_dir,
+                max_edge=max_edge,
+                quality=quality,
+            )
+        }
         targets = plan.targets
         extracted = 0
         cache_hits = 0
@@ -307,7 +362,10 @@ class SamplingPipeline:
                 )
 
             existing = committed.get(target.frame_id)
-            if existing is not None and self._frame_is_reusable(existing):
+            replaced_corrupt = existing is not None
+            if existing is not None and self._frame_is_reusable(
+                existing, target, frames_dir, max_edge=max_edge, quality=quality
+            ):
                 frames.append(existing)
                 cache_hits += 1
                 emit("extracting", index, len(targets))
@@ -347,7 +405,8 @@ class SamplingPipeline:
             extracted += 1
             emit("extracting", index, len(targets))
 
-            if extracted % CHECKPOINT_EVERY == 0:
+            # Replacing a corrupt cached frame must be committed immediately.
+            if extracted % CHECKPOINT_EVERY == 0 or replaced_corrupt:
                 write_checkpoint(
                     checkpoint_path,
                     Checkpoint(
@@ -379,14 +438,20 @@ class SamplingPipeline:
         uncovered = [segment.scene_id for segment in scan.segments if segment.scene_id not in covered_scenes]
         mismatches = [frame["frame_id"] for frame in frames if frame.get("pts_mismatch")]
         warnings: list[str] = []
+        coverage_reasons: list[str] = []
         if mismatches:
             warnings.append(f"{len(mismatches)} frame(s) decoded with a PTS offset above tolerance")
+            coverage_reasons.append("pts_mismatch")
         if uncovered:
             warnings.append(f"scenes without a sampled frame: {', '.join(uncovered)}")
+            coverage_reasons.append("uncovered_scenes")
         if observed_gap > plan.max_gap_ms:
             warnings.append(
                 f"observed max gap {observed_gap} ms exceeds target {plan.max_gap_ms} ms"
             )
+            coverage_reasons.append("observed_gap_over_target")
+        execution_status = "complete"
+        coverage_status = "sufficient" if not coverage_reasons else "insufficient"
 
         manifest = {
             "manifest_version": "s02-sampling-1.0.0",
@@ -404,9 +469,13 @@ class SamplingPipeline:
             "segments": [segment.to_dict() for segment in scan.segments],
             "plan": plan.to_dict(),
             "frames": frames,
+            "execution_status": execution_status,
+            "coverage_status": coverage_status,
             "observed_max_gap_ms": observed_gap,
             "expected_max_gap_ms": plan.expected_max_gap_ms,
             "coverage": {
+                "status": coverage_status,
+                "reasons": coverage_reasons,
                 "scene_count": len(scan.segments),
                 "scenes_without_frames": uncovered,
                 "pts_mismatch_frames": mismatches,
@@ -429,6 +498,7 @@ class SamplingPipeline:
                 profile=profile,
                 fingerprint=fingerprint,
                 sampled_at=manifest["created_at"],
+                coverage=coverage_status,
             )
 
         return SamplingOutcome(
@@ -445,6 +515,8 @@ class SamplingPipeline:
             cache_hits=cache_hits,
             elapsed_s=time.monotonic() - started,
             observed_max_gap_ms=observed_gap,
+            execution_status=execution_status,
+            coverage_status=coverage_status,
             warnings=warnings,
         )
 
@@ -467,6 +539,7 @@ class SamplingPipeline:
                 profile=profile,
                 fingerprint=fingerprint,
                 sampled_at=None,
+                coverage="unknown",
             )
         frames = [committed[key] for key in sorted(committed)]
         plan = self._load_plan(cache_dir / "plan.json") or SamplingPlan(
@@ -491,6 +564,8 @@ class SamplingPipeline:
             observed_max_gap_ms=observed_max_gap(
                 [frame["normalized_pts_ms"] for frame in frames], timeline.duration_ms
             ),
+            execution_status="cancelled",
+            coverage_status="unknown",
             warnings=["cancelled by operator; committed frames are resumable"],
         )
 

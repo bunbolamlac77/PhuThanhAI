@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from phuthanhai.analyzer.vlm_worker import (
+    LEGACY_REQUEST_VERSION,
     REQUEST_VERSION,
     VISUAL_PROMPT,
     WorkerError,
@@ -38,7 +39,7 @@ class RequestValidationTests(unittest.TestCase):
 
     def _payload(self, **overrides: object) -> dict:
         payload = {
-            "request_version": REQUEST_VERSION,
+            "request_version": LEGACY_REQUEST_VERSION,
             "job_id": "job-1",
             "model_path": str(self.model),
             "image_path": str(self.image),

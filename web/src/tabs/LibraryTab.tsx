@@ -19,6 +19,7 @@ import AssetGrid from "../components/AssetGrid";
 import NotesPanel, { type SaveStatus } from "../components/NotesPanel";
 import Player, { type PlayerController } from "../components/Player";
 import SamplingPanel from "../components/SamplingPanel";
+import VisionPanel from "../components/VisionPanel";
 import StarRating from "../components/StarRating";
 import { formatBytes } from "../lib/format";
 
@@ -745,6 +746,20 @@ export default function LibraryTab({ online, session }: Props) {
                     patchAsset(assetId, () => fresh);
                   } catch {
                     // A refresh failure must not hide the completed state already shown.
+                  }
+                })();
+              }}
+            />
+            <VisionPanel
+              asset={activeAsset}
+              online={online}
+              onCompleted={(assetId) => {
+                void (async () => {
+                  try {
+                    const fresh = await getAsset(assetId);
+                    patchAsset(assetId, () => fresh);
+                  } catch {
+                    // keep the summary already on screen
                   }
                 })();
               }}

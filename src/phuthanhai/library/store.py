@@ -131,6 +131,11 @@ _ASSET_COLUMNS = (
     "sampling_profile",
     "sampling_fingerprint",
     "sampled_at",
+    "sampling_coverage",
+    "analysis_id",
+    "analysis_fingerprint",
+    "analysis_coverage",
+    "analysis_updated_at",
     "created_at",
     "updated_at",
 )
@@ -235,11 +240,28 @@ def set_sampling_state(
     profile: str | None,
     fingerprint: str | None,
     sampled_at: str | None,
+    coverage: str | None = None,
 ) -> None:
     conn.execute(
         "UPDATE assets SET sampling_status = ?, sampling_profile = ?, sampling_fingerprint = ?, "
-        "sampled_at = ?, updated_at = ? WHERE asset_id = ?",
-        (status, profile, fingerprint, sampled_at, utc_now_iso(), asset_id),
+        "sampled_at = ?, sampling_coverage = ?, updated_at = ? WHERE asset_id = ?",
+        (status, profile, fingerprint, sampled_at, coverage, utc_now_iso(), asset_id),
+    )
+
+
+def set_analysis_state(
+    conn: sqlite3.Connection,
+    asset_id: str,
+    *,
+    status: str,
+    analysis_id: str | None,
+    fingerprint: str | None,
+    coverage: str | None,
+) -> None:
+    conn.execute(
+        "UPDATE assets SET analysis_status = ?, analysis_id = ?, analysis_fingerprint = ?, "
+        "analysis_coverage = ?, analysis_updated_at = ?, updated_at = ? WHERE asset_id = ?",
+        (status, analysis_id, fingerprint, coverage, utc_now_iso(), utc_now_iso(), asset_id),
     )
 
 

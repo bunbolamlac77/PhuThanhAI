@@ -173,6 +173,10 @@ class AssetOut(BaseModel):
     sampling_status: str = "not_sampled"
     sampling_profile: str | None = None
     sampled_at: str | None = None
+    sampling_coverage: str | None = None
+    analysis_id: str | None = None
+    analysis_coverage: str | None = None
+    analysis_updated_at: str | None = None
     source_state: str
     error_code: str | None = None
     size_bytes: int
@@ -251,5 +255,27 @@ class SamplingSummary(BaseModel):
     sampling_status: str
     sampling_profile: str | None
     sampled_at: str | None
+    coverage_status: str | None
     fingerprint: str | None
     manifest: dict[str, Any] | None = None
+
+
+class AnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["auto", "single_frame", "sequential_frames", "multi_frame"] = "auto"
+
+
+class AnalysisSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    asset_id: str
+    analysis_status: str
+    analysis_id: str | None
+    coverage_status: str | None
+    method: str | None
+    frames_total: int
+    frames_observed: int
+    frames_unknown: int
+    warnings: list[str]
+    evidence: dict[str, Any] | None = None
