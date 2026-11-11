@@ -83,6 +83,21 @@ final class SelfTestRunner: NSObject, WKNavigationDelegate {
             out.videos.push(Object.assign({file: a.filename}, res));
             v.remove();
           }
+          const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+          const buttons = [...document.querySelectorAll('button')].filter(visible);
+          const inputs = [...document.querySelectorAll('input, select, textarea')].filter(visible);
+          out.a11y = {
+            lang: document.documentElement.lang || null,
+            buttons: buttons.length,
+            unnamed_buttons: buttons.filter(b => !((b.innerText || b.textContent || '').trim() || b.getAttribute('aria-label') || b.title)).map(b => (b.outerHTML || '').slice(0, 240)).slice(0, 10),
+            inputs: inputs.length,
+            unlabeled_inputs: inputs.filter(i => !(i.getAttribute('aria-label') || i.getAttribute('aria-labelledby') || (i.id && document.querySelector('label[for="' + i.id + '"]')) || i.closest('label'))).map(i => i.id || i.type).slice(0, 10),
+            images_without_alt: [...document.querySelectorAll('img')].filter(i => !i.hasAttribute('alt')).length,
+            headings: document.querySelectorAll('h1,h2,h3').length,
+            focusable: [...document.querySelectorAll('button,a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')].filter(visible).length,
+            reduced_motion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+            base_font_px: getComputedStyle(document.body).fontSize,
+          };
           return JSON.stringify(out);
         """
         do {

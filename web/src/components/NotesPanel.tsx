@@ -209,6 +209,7 @@ function ProjectNotes({
           type="text"
           value={text}
           placeholder="Ghi chú cho toàn dự án…"
+          aria-label="Ghi chú cho toàn dự án"
           onChange={(event) => setText(event.target.value)}
         />
         <button

@@ -244,6 +244,34 @@ def main() -> int:
         audit,
     ))
 
+    bench5000 = json.loads((OUT / "bench5000.json").read_text()) if (OUT / "bench5000.json").is_file() else {}
+    steps.append(step(
+        "5,000-asset benchmark (API + virtualized DOM + restart)",
+        "PASS" if bench5000.get("passed") else "NOT VERIFIED",
+        f"API list p95={bench5000.get('backend',{}).get('list_p95_ms')}ms search p95={bench5000.get('backend',{}).get('search_p95_ms')}ms · "
+        f"DOM cards={bench5000.get('browser',{}).get('asset_card_nodes')} total={bench5000.get('browser',{}).get('total_label')} · "
+        f"restart={bench5000.get('backend',{}).get('restart_total')}",
+        bench5000,
+    ))
+
+    endurance = json.loads((OUT / "endurance.json").read_text()) if (OUT / "endurance.json").is_file() else {}
+    cancel = endurance.get("cancel", {})
+    steps.append(step(
+        "real-model endurance (multi-batch, RSS/MLX/swap)",
+        "PASS" if endurance.get("passed") else "NOT VERIFIED",
+        f"{endurance.get('completed_clips',0)}/{endurance.get('planned_clips',0)} clips completed; "
+        f"deferred_by_governor={bool(endurance.get('governor_refusals'))}; "
+        f"first batch swap delta={round((endurance.get('clips',[{}])[0].get('swap_delta_bytes') or 0)/1024**3,2)} GiB",
+        endurance,
+    ))
+    steps.append(step(
+        "live Qwen3-VL cancel + resume",
+        "PASS" if cancel.get("passed") else "FAIL",
+        f"committed={cancel.get('committed_frames_at_cancel')} cancel={cancel.get('cancel_seconds')}s "
+        f"state={cancel.get('job_state')} workers={cancel.get('active_workers')} resume={cancel.get('resume_state')}",
+        cancel,
+    ))
+
     build = app_build()
     selftest = app_selftest()
     (OUT / "app_selftest.json").write_text(json.dumps(selftest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -252,12 +280,22 @@ def main() -> int:
     by_name = {v.get("file"): v for v in videos}
     expected = {"cfr.mp4", "prores.mov", "rotation.mp4", "vfr.mp4"}
     codec_ok = expected <= {v.get("file") for v in playable}
+    a11y = selftest.get("a11y") or {}
+    a11y_ok = not a11y.get("unnamed_buttons") and not a11y.get("unlabeled_inputs") and a11y.get("images_without_alt") == 0
     steps.append(step(
         "native .app build + WKWebView self-test",
         "PASS" if build["exists"] and selftest.get("ok") and codec_ok else "FAIL",
         f"library={selftest.get('library')} health={selftest.get('health')} playable={len(playable)}/{len(videos)} "
-        f"codecs={'ok' if codec_ok else 'missing'}",
+        f"codecs={'ok' if codec_ok else 'missing'} · a11y_auto={'ok' if a11y_ok else 'issues'}",
         selftest,
+    ))
+    steps.append(step(
+        "automated accessibility audit (WKWebView DOM)",
+        "PASS" if a11y_ok else "FAIL",
+        f"lang={a11y.get('lang')} buttons={a11y.get('buttons')} unnamed={len(a11y.get('unnamed_buttons',[]))} "
+        f"inputs={a11y.get('inputs')} unlabeled={len(a11y.get('unlabeled_inputs',[]))} "
+        f"images_without_alt={a11y.get('images_without_alt')} focusable={a11y.get('focusable')}",
+        a11y,
     ))
 
     launch = launch_check()
@@ -279,31 +317,30 @@ def main() -> int:
         security,
     ))
 
-    # Honest gaps: mandatory G5 breadth and endurance were not fully exercised.
+    golden = json.loads((OUT / "golden" / "manifest.json").read_text()) if (OUT / "golden" / "manifest.json").is_file() else {}
     steps.append(step(
-        "golden dataset: 3 genres with reviewer labels",
+        "golden dataset: 3 genres with human labels",
         "NOT VERIFIED",
-        "Only wedding footage + synthetic controls available; no daily vlog/travel or event/BTS reviewer-labeled set. "
-        "Recognition numbers above are tuned and evaluated on the same 2 clips.",
-        {"groups": ["wedding_traditional (2 clips)", "controls (2 synthetic)"], "missing": ["daily vlog/travel", "event/BTS"]},
+        f"wedding={golden.get('available',{}).get('wedding_traditional',0)} pending labels, "
+        f"vlog_travel={golden.get('available',{}).get('vlog_travel',0)}, event_bts={golden.get('available',{}).get('event_bts',0)}; "
+        "missing authorized footage for two genres and no owner-confirmed labels",
+        golden,
+    ))
+    playback = json.loads((OUT / "playback_inference.json").read_text()) if (OUT / "playback_inference.json").is_file() else {}
+    steps.append(step(
+        "playback + notes while real inference runs (browser E2E)",
+        "PASS" if playback.get("passed") else "FAIL",
+        f"job running before/after={playback.get('analysis_state_before_ui')}/{playback.get('analysis_state_after_ui')} "
+        f"play={playback.get('play_ok')} note={playback.get('note_saved')} ({playback.get('note_saved_ms')}ms) "
+        f"clip_switch_clean={playback.get('second_clip_note_empty')} workers={len(playback.get('workers_seen',[]))} "
+        f"final={playback.get('final_state')}",
+        playback,
     ))
     steps.append(step(
-        "endurance: 5,000 assets / multi-clip real-model batches",
+        "manual VoiceOver / reduced-motion QA",
         "NOT VERIFIED",
-        "1,000-asset index suite passes; 5,000-asset and sustained multi-clip model batches were not run. "
-        "Real multi-clip inference is swap-bound on this 16 GB machine.",
-        {"covered": "1,000 assets (tests/test_library_perf.py)"},
-    ))
-    steps.append(step(
-        "real-model cancel / UI playback during inference",
-        "NOT VERIFIED",
-        "Cancel/reap is proven with the protocol worker and app quit; cancelling a live Qwen3-VL generate and "
-        "browser playback during that generation were not exercised on real footage.",
-    ))
-    steps.append(step(
-        "accessibility / reduced-motion QA",
-        "NOT VERIFIED",
-        "No VoiceOver or reduced-motion pass was performed on the native app.",
+        "Automated DOM audit passes; no VoiceOver screen-reader session or system reduced-motion toggle was performed.",
+        {"reduced_motion_matches": a11y.get("reduced_motion")},
     ))
 
     leftovers = [line for line in subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout.splitlines()

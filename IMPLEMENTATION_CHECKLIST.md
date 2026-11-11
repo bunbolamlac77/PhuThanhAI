@@ -233,3 +233,21 @@ NEXT STEP: ... (nếu PASS)
 
 **G5 note:** functional, native and security checks pass; the gate stays NOT VERIFIED until the
 dataset, endurance, live-cancel and accessibility items above are executed.
+
+## S05.1 — G5 closure attempt
+
+> **Result 2026-11-11:** **G5 NOT VERIFIED**. 314 tests pass; native app, 5,000-asset,
+> live cancel, playback-during-inference and automated accessibility are verified.
+> Evidence: `artifacts/qa/S05/{gate.md,gate.json,bench5000.json,endurance.json,playback_inference.json,app_selftest.json,app_launch.json,golden/}`.
+
+- [x] 5,000-asset backend + virtualized DOM + restart benchmark.
+- [x] Real Qwen3-VL live cancel with committed evidence and resume.
+- [x] Browser playback/seek/notes/clip-switch during a real model job; one worker; cancel.
+- [x] Automated accessibility audit in WKWebView (0 unnamed buttons/unlabeled inputs).
+- [x] Golden dataset manager with frame extraction, pending labels and split field (10 wedding).
+- [ ] Human labels for 10 wedding + 10 vlog/travel + 10 event/BTS real clips, held-out evaluation.
+- [ ] Sustained endurance past the first batch (governor stopped on rising swap; protective, not bypassed).
+- [ ] Manual VoiceOver / reduced-motion QA.
+
+**G5 next:** owner supplies/authorizes the missing genres and labels, endurance is re-run
+under a cooled memory state, and accessibility is reviewed manually. No S06/POV.

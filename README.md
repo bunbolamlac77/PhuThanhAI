@@ -198,38 +198,43 @@ Evidence is local-only in `artifacts/qa/S02/`.
 | Scenario matrix | 18/18 (1–11 rule-level synthetic observations, 12–18 real/restart/contract/E2E) |
 | UI regression | player/notes/autosave/shortcuts PASS in Chrome |
 
-## S05 result on this machine (2026-11-11)
+## S05 / S05.1 result on this machine (2026-11-11)
 
-`python3 tools/run_s05_gate.py` → **G5 NOT VERIFIED** (functional steps pass; mandatory
-three-genre review and endurance items are missing, listed in the gate).
+`python3 tools/run_s05_gate.py` → **G5 NOT VERIFIED**. All functional, native,
+migration, 5,000-asset, cancel, playback-during-inference and automated
+accessibility checks pass. Two mandatory gates remain open.
 
 | Fact | Measured value |
 |---|---|
 | Tests | 314 passed, 0 failed, 1 skipped (optional real-footage scan when env unset) |
-| Scene timecode | 16/16 sampled frames inside S02 manifest scene windows; all 16 first frames sat 1–3 s after scene start and are now reported at the true boundary |
-| DB migration | real S03 (v4) SQLite built from the S03 source → v5: IDs/notes/rating/favorite/tags preserved; repeated migration is a no-op; simulated failure restores the pre-migration backup |
-| Recognition | before 0.800/0.444 → after 1.000/0.778 (precision/recall on the same 2 clips — not held out) |
-| Native app | `.app` built with `swiftc`+SDK, icon, Info.plist, ad-hoc signature; Finder/Spotlight launch, Dock foreground, one app + one backend (parent = app), clean quit reaps backend and frees the port |
-| WKWebView | real React shell + health 200; 8/8 videos `readyState 4`: H.264, HEVC 4K, ProRes fixture, rotation-corrected 240×320, VFR |
-| Portable/security | V2/V3 package roundtrip validates; private notes remain hidden in hidden export |
-| Screen | `artifacts/qa/S05/app_screen2.png` (real WKWebView window on the MacBook display) |
+| Scene timecode | 16/16 sampled frames inside S02 manifest windows; all 16 first frames sat 1–3 s after scene start and now report the true boundary |
+| DB migration | real S03/v4 SQLite → v5: IDs/notes/rating/favorite/tags preserved; repeat no-op; failed migration restores backup |
+| Recognition | 0.800/0.444 → 1.000/0.778 on the **same 2 clips** (not held out) |
+| 5,000 assets | insert 0.10 s; list p50/p95 5.8/5.7 ms; search p95 8.3 ms; restart total 5,000; 18 DOM cards; playback OK |
+| Live cancel | real Qwen3-VL: 1 committed frame → cancel 0.51 s → 0 workers → resume complete; unique frames |
+| Playback during inference | job running before/after; play/seek PASS; note saved in 3.19 s; clip switch draft clean; one worker; cancelled |
+| Native app | `.app` launch via Finder/Spotlight, Dock foreground, one app + one backend (parent=app), quit reaps backend and port |
+| WKWebView | 8/8 videos readyState 4: H.264, HEVC 4K, ProRes, rotation, VFR |
+| Accessibility (automated) | `lang=vi`, 10 buttons / 0 unnamed, 19 inputs / 0 unlabeled, 0 images without alt, 39 focusable |
+| Golden dataset | 10 wedding clips captured with frames, **0 labels confirmed**; no authorized vlog/travel or event/BTS footage |
 
-### G5 NOT VERIFIED because
+### Why G5 is still NOT VERIFIED
 
-- **Golden dataset:** only wedding footage + synthetic controls exist on this machine; no
-  reviewer-labeled daily vlog/travel or event/BTS set. Recognition was tuned and evaluated
-  on the same two clips, so the improved numbers are not a generalization estimate.
-- **Endurance:** the 1,000-asset suite passes, but 5,000 assets and sustained multi-clip
-  real-model batches were not run; 16 GB swap limits long runs.
-- **Real-model cancel / playback during inference:** cancel/reap is proven with the protocol
-  worker and app quit, not by cancelling a live Qwen3-VL generate while playing video.
-- **Accessibility:** no VoiceOver or reduced-motion pass on the native app.
+- **Golden dataset:** only 10 wedding clips are available and their labels are
+  `pending`; 10 vlog/travel and 10 event/BTS real clips are missing. No held-out
+  precision/recall can be computed, and the 0.778 recall is on tuning clips.
+- **Real-model endurance:** after one 4-frame batch (swap +2.67 GiB) the
+  ResourceGovernor refused the next clip with `MEMORY_PRESSURE_RISING`; this is
+  protective behaviour, but only 1/3 planned clips completed.
+- **Manual VoiceOver/reduced-motion:** automated DOM audit passes; no screen-reader
+  session or system reduced-motion toggle was performed.
 
 ## Known limitations (S00–S05)
 
-- **G5 is NOT VERIFIED**, not failed: all functional/security/native checks pass, but the
-  mandatory three-genre reviewer dataset, 5,000-asset endurance, live-model cancel and
-  accessibility review are missing. Do not describe S05 as production-accepted.
+- **G5 is NOT VERIFIED**, not failed: functional/native/security, 5,000-asset, live
+  cancel, playback-during-inference and automated accessibility checks pass. Missing:
+  human three-genre labels, completed sustained endurance, and manual VoiceOver QA.
+  Do not describe S05 as production-accepted.
 - **Recognition remains narrow:** the 1.000/0.778 numbers come from the same two wedding
   clips used for tuning; altar recall improved, but reception on vid_022 is still missed
   and there is no held-out genre evaluation.
@@ -241,11 +246,12 @@ three-genre review and endurance items are missing, listed in the gate).
   because AIVideo compatibility is not established.
 - **Browser fallback** is implemented (opens the loopback UI and shows the WKWebView error),
   but its manual failure path was not exercised in an E2E test.
-- **5,000 assets / long real-model batches** are not verified; 1,000 assets are.
-- **Live Qwen3-VL cancel** during `generate()` and playback-during-inference are not verified;
-  process-level cancel/reap is verified with the fake protocol worker and app quit.
-- **Accessibility:** labels exist for key controls, but VoiceOver, focus-order and
-  reduced-motion passes were not performed.
+- **5,000 assets** are verified; sustained multi-clip real-model batches are not (one
+  batch completed, then the governor stopped the run).
+- **Live Qwen3-VL cancel** and **playback/notes during inference** are verified on the
+  real worker; the model job was cancelled while the browser played/seeking and saved a note.
+- **Accessibility:** automated DOM audit passes (names/labels/alt/lang); manual
+  VoiceOver, full focus-order walk and system reduced-motion toggle remain unverified.
 - **POV remains locked**; S06 (script engine/TTS) was not started.
 - **Skipped pytest:** `tests/test_scanner.py::RealFootageScanTests::test_scan_real_folder_read_only`
   skips when `PHUTHANHAI_TEST_FOOTAGE` is unset; this is intentional and matches the gate logs.
