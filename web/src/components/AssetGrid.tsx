@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { Asset } from "../api";
 import { thumbnailUrl } from "../api";
 import { formatShort, displayDimensions } from "../lib/format";
@@ -15,21 +15,64 @@ interface Props {
   onLoadMore: () => void;
 }
 
-const CARD_WIDTH = 190;
-const CARD_HEIGHT = 188;
-const GAP = 8;
+const CARD_WIDTH = 154;
+const CARD_HEIGHT = 180;
+const GAP = 10;
+
+type ThumbnailState = "loading" | "ready" | "error";
+
+function FilmIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 48 48" fill="none" stroke="currentColor"
+      strokeWidth="1.6" aria-hidden="true">
+      <rect x="8" y="10" width="32" height="28" rx="4" />
+      <path d="M17 10v28M31 10v28M8 19h9M8 29h9M31 19h9M31 29h9" />
+      <path d="M22 20l6 4-6 4v-8z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function Thumbnail({ asset }: { asset: Asset }) {
+  const [state, setState] = useState<ThumbnailState>("loading");
+  const available = asset.source_state === "available";
+  const label = !available
+    ? "Nguồn không khả dụng"
+    : state === "error"
+      ? "Không có ảnh xem trước"
+      : "Đang tải ảnh";
+
+  return (
+    <>
+      {state !== "ready" || !available ? (
+        <div className="asset-card__fallback" aria-hidden="true">
+          <FilmIcon />
+          <span>{label}</span>
+        </div>
+      ) : null}
+      {available ? (
+        <img
+          src={thumbnailUrl(asset.asset_id)}
+          className={state === "ready" ? "asset-card__image is-loaded" : "asset-card__image"}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          hidden={state === "error"}
+          onLoad={() => setState("ready")}
+          onError={() => setState("error")}
+        />
+      ) : null}
+    </>
+  );
+}
 
 export default function AssetGrid({
-  assets,
-  activeId,
-  selected,
-  loading,
-  hasMore,
-  onActivate,
-  onToggleSelect,
-  onLoadMore,
+  assets, activeId, selected, loading, hasMore, onActivate, onToggleSelect, onLoadMore,
 }: Props) {
-  const { containerRef, element, columns, rowHeight, totalHeight, startIndex, endIndex, viewportWidth, viewportHeight } = useVirtualGrid({
+  const {
+    containerRef, element, columns, rowHeight, totalHeight, startIndex, endIndex,
+    viewportWidth, viewportHeight,
+  } = useVirtualGrid({
     itemCount: assets.length,
     itemWidth: CARD_WIDTH,
     itemHeight: CARD_HEIGHT,
@@ -38,32 +81,33 @@ export default function AssetGrid({
 
   useEffect(() => {
     if (!element) return;
-    const handler = () => {
-      if (!hasMore || loading) return;
-      if (element.scrollTop + element.clientHeight > element.scrollHeight - 600) {
-        onLoadMore();
-      }
+    const onScroll = () => {
+      if (loading || !hasMore) return;
+      const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
+      if (distance < 600) onLoadMore();
     };
-    element.addEventListener("scroll", handler, { passive: true });
-    return () => element.removeEventListener("scroll", handler);
+    element.addEventListener("scroll", onScroll, { passive: true });
+    return () => element.removeEventListener("scroll", onScroll);
   }, [element, hasMore, loading, onLoadMore]);
 
-  if (!loading && assets.length === 0) {
+  if (assets.length === 0) {
     return (
-      <div className="empty-state">
-        <p className="empty-state__title">Chưa có asset nào</p>
-        <p>Nhập đường dẫn thư mục footage rồi bấm “Quét thư mục”. Chỉ file video mới được index.</p>
+      <div className="empty-state studio-library-empty" role="status">
+        <div className="studio-library-empty__icon"><FilmIcon /></div>
+        <p className="empty-state__title">{loading ? "Đang tải thư viện…" : "Chưa có video"}</p>
+        <p>{loading ? "Đang đọc dữ liệu clip." : "Chọn dự án và quét thư mục để thêm footage."}</p>
       </div>
     );
   }
 
-  const window = assets.slice(startIndex, endIndex);
+  const visible = assets.slice(startIndex, endIndex);
 
   return (
     <div
-      className="asset-grid"
       ref={containerRef}
+      className="asset-grid studio-asset-grid"
       role="listbox"
+      aria-multiselectable="true"
       aria-label="Danh sách video"
       data-columns={columns}
       data-window={`${startIndex}-${endIndex}`}
@@ -71,75 +115,74 @@ export default function AssetGrid({
       data-viewport={`${viewportWidth}x${viewportHeight}`}
     >
       <div className="asset-grid__inner" style={{ height: totalHeight }}>
-        {window.map((asset, offset) => {
+        {visible.map((asset, offset) => {
           const index = startIndex + offset;
           const row = Math.floor(index / columns);
           const column = index % columns;
-          const isActive = asset.asset_id === activeId;
-          const isSelected = selected.has(asset.asset_id);
-          const noteCount = asset.note_count ?? 0;
+          const active = asset.asset_id === activeId;
+          const checked = selected.has(asset.asset_id);
           return (
             <div
               key={asset.asset_id}
+              role="option"
+              tabIndex={0}
+              aria-selected={active}
+              aria-label={`${asset.filename}, ${formatShort(asset.duration_ms)}`}
               className={[
                 "asset-card",
-                isActive ? "asset-card--active" : "",
-                isSelected ? "asset-card--selected" : "",
+                "studio-asset-card",
+                active ? "asset-card--active" : "",
+                checked ? "asset-card--selected" : "",
                 asset.source_state !== "available" ? "asset-card--missing" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
+              ].filter(Boolean).join(" ")}
               style={{
                 width: CARD_WIDTH,
                 height: CARD_HEIGHT,
                 transform: `translate(${column * (CARD_WIDTH + GAP)}px, ${row * rowHeight}px)`,
               }}
-              role="option"
-              aria-selected={isActive}
-              tabIndex={0}
               onClick={() => onActivate(asset)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") onActivate(asset);
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onActivate(asset);
+                } else if (event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onToggleSelect(asset);
+                }
               }}
             >
               <div className="asset-card__thumb">
-                <img src={thumbnailUrl(asset.asset_id)} alt="" loading="lazy" draggable={false} />
+                <Thumbnail asset={asset} />
                 <span className="asset-card__duration">{formatShort(asset.duration_ms)}</span>
                 <label className="asset-card__check" onClick={(event) => event.stopPropagation()}>
                   <input
                     type="checkbox"
-                    checked={isSelected}
-                    onChange={() => onToggleSelect(asset)}
+                    checked={checked}
                     aria-label={`Chọn ${asset.filename}`}
+                    onChange={() => onToggleSelect(asset)}
                   />
                 </label>
                 {asset.review?.favorite ? <span className="asset-card__star">★</span> : null}
               </div>
-              <div className="asset-card__name" title={asset.filename}>
-                {asset.filename}
-              </div>
+              <div className="asset-card__name" title={asset.filename}>{asset.filename}</div>
               <div className="asset-card__meta">
-                <span>{asset.codec ?? "—"}</span>
+                <span>{(asset.codec ?? "Video").toUpperCase()}</span>
                 <span>{displayDimensions(asset.width, asset.height, asset.rotation)}</span>
               </div>
               <div className="asset-card__badges">
-                {noteCount > 0 ? <span className="badge badge--note">{noteCount} ghi chú</span> : null}
-                {asset.review?.rating ? <span className="badge">★ {asset.review.rating}</span> : null}
-                {asset.source_state !== "available" ? (
-                  <span className="badge badge--danger">{asset.source_state}</span>
+                {(asset.note_count ?? 0) > 0 ? (
+                  <span className="badge badge--note">{asset.note_count} ghi chú</span>
                 ) : null}
-                {asset.error_code ? <span className="badge badge--danger">{asset.error_code}</span> : null}
-                {asset.sampling_status === "complete" ? (
-                  <span className="badge badge--ok">sampled</span>
-                ) : null}
-                {asset.sampling_status === "sampling" || asset.sampling_status === "queued" ? (
-                  <span className="badge badge--warn">sampling</span>
-                ) : null}
+                {asset.review?.rating != null ? <span className="badge">★ {asset.review.rating}</span> : null}
+                {asset.sampling_status === "complete" ? <span className="badge badge--ok">Đã lấy mẫu</span> : null}
+                {asset.source_state !== "available" ? <span className="badge badge--danger">Thiếu nguồn</span> : null}
               </div>
             </div>
           );
         })}
-        {loading ? <div className="asset-grid__loading">Đang tải…</div> : null}
+        {loading ? <div className="asset-grid__loading">Đang tải thêm video…</div> : null}
       </div>
     </div>
   );

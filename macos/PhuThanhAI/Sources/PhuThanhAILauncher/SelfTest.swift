@@ -54,7 +54,7 @@ final class SelfTestRunner: NSObject, WKNavigationDelegate {
         let script = """
           const out = {title: document.title, library: false, health: null, videos: []};
           for (let i = 0; i < 60; i++) {
-            if (document.querySelector('.library-grid')) { out.library = true; break; }
+            if (document.querySelector('.studio-workspace')) { out.library = true; break; }
             await new Promise(r => setTimeout(r, 250));
           }
           try { const h = await fetch('/api/v1/health'); out.health = h.status; } catch (e) { out.health = 'error'; }

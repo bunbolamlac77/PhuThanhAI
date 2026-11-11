@@ -8,6 +8,7 @@ as JSON and reduced to the fields the contracts need.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -24,10 +25,23 @@ class ProbeError(RuntimeError):
         self.code = code
 
 
-def find_tool(name: str) -> str | None:
-    """Resolve ffmpeg/ffprobe from PATH; explicit argv only."""
+#: Finder-launched apps get a minimal PATH (often /usr/bin:/bin), so Homebrew
+#: binaries are not discoverable. This is a discovery fallback, not a per-call
+#: hardcoded path: PATH still wins, and the candidate must be executable.
+_TOOL_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
 
-    return shutil.which(name)
+
+def find_tool(name: str) -> str | None:
+    """Resolve ffmpeg/ffprobe from PATH, then standard Homebrew/system locations."""
+
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in _TOOL_DIRS:
+        candidate = Path(directory) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def tool_version(name: str) -> str | None:

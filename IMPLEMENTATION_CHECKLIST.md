@@ -268,3 +268,18 @@ under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
 - [ ] Manual VoiceOver/reduced-motion checklist signed by owner.
 
 **G5 remains NOT VERIFIED until the three items above are completed. No S06/POV.**
+
+## S05.3 — Studio UI refresh (UI-only)
+
+> Branch `ui/studio-refresh`. No backend contracts, model, sampling or report logic changed.
+> G5 remains **NOT VERIFIED**; this milestone does not change that verdict.
+
+- [x] 23/54/23 three-region workspace; library two-column grid, player dominant.
+- [x] Inspector tabs (Ghi chú / Phân tích AI) keep both panels mounted and preserve drafts/polling.
+- [x] Advanced filters collapsed; player shortcuts ignored when a button/tab/summary has focus.
+- [x] Thumbnail fallback UI; backend ffmpeg discovery fixed for Finder-minimal PATH (verified 200 JPEG).
+- [x] Footer no longer shows stale S01/S02–S03 claims.
+- [x] Automated Studio UI E2E: layout ratios, tabs, draft preservation, fallback, resize, keyboard.
+- [x] Full pytest, S01 1,000/54 E2E, note flow, app self-test (8/8 codecs, automated a11y).
+- [x] Real WKWebView screenshot `artifacts/qa/S05/studio_app2.png`.
+- [ ] Manual visual review of spacing/typography by project owner (requested next).

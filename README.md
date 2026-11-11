@@ -231,6 +231,32 @@ accessibility checks pass. Two mandatory gates remain open.
 - **Manual VoiceOver/reduced-motion:** automated DOM audit passes; the checklist
   (`artifacts/qa/S05/voiceover_checklist.md`) and owner confirmation are pending.
 
+## Studio UI refresh (S05.3)
+
+The app shell is now a three-region editing workspace: **Library ~23% · Player
+~54% · Inspector ~23%** (360 / flexible / 360 px at 1440 px). The Inspector has
+two tabs (Ghi chú and Phân tích AI), both kept mounted so drafts, autosave and
+sampling/AI polling survive tab switches.
+
+- Advanced library filters are collapsed under "Bộ lọc nâng cao".
+- Player shortcuts are suppressed when focus is on a button, tab or summary.
+- Thumbnail failures show a film-strip fallback ("Không có ảnh xem trước") instead
+  of a broken image. Root cause of the app failure was ffmpeg discovery under the
+  Finder-minimal PATH; `find_tool` now falls back to `/opt/homebrew/bin` and
+  `/usr/local/bin` when PATH lacks it (verified: thumbnail endpoint returns
+  `image/jpeg` with `PATH=/usr/bin:/bin`).
+- Footer no longer claims S01/S02–S03 are unimplemented.
+
+Validated with `npm run build`, full pytest, `tools/run_s01_e2e.py` (1,000 and 54
+assets), `tools/run_s01_ui_flow.py` (note/autosave/shortcuts),
+`tools/run_s05_studio_ui.py` (layout ratio, Inspector state, thumbnail fallback,
+keyboard guard, 1200/820 px resize), `tools/verify_studio_ui.py`, and the signed
+`.app` WKWebView self-test (8/8 codecs, 0 accessibility issues).
+Screenshot: `artifacts/qa/S05/studio_app2.png` (real app window).
+
+This is a UI-only milestone: contracts, Qwen3-VL, sampling, reports and the G5
+verdict (**NOT VERIFIED**) are unchanged.
+
 ## Known limitations (S00–S05)
 
 - **G5 is NOT VERIFIED**, not failed: functional/native/security, 5,000-asset, live

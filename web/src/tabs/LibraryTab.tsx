@@ -20,6 +20,7 @@ import NotesPanel, { type SaveStatus } from "../components/NotesPanel";
 import Player, { type PlayerController } from "../components/Player";
 import SamplingPanel from "../components/SamplingPanel";
 import VisionPanel from "../components/VisionPanel";
+import InspectorTabs from "../components/InspectorTabs";
 import ContextProfileSelector from "../components/ContextProfileSelector";
 import StarRating from "../components/StarRating";
 import { formatBytes } from "../lib/format";
@@ -500,6 +501,7 @@ export default function LibraryTab({ online, session }: Props) {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) return;
+      if (target?.closest('button, [role="tab"], summary, [role="dialog"]')) return;
       const controller = controllerRef.current;
       if (!controller) return;
 
@@ -535,10 +537,10 @@ export default function LibraryTab({ online, session }: Props) {
   }, [moveSelection]);
 
   return (
-    <div className="library-grid">
+    <div className="studio-workspace">
       <section className="panel" aria-label="Thư viện media">
         <div className="panel__head">
-          <h2>1 · Thư viện</h2>
+          <h2>Thư viện</h2>
           <span className="badge">{total} clip</span>
         </div>
 
@@ -584,6 +586,8 @@ export default function LibraryTab({ online, session }: Props) {
           onChange={(event) => setQueryInput(event.target.value)}
         />
 
+        <details className="studio-filter-details">
+          <summary>Bộ lọc nâng cao</summary>
         <div className="toolbar toolbar--muted">
           <select value={sort} aria-label="Sắp xếp" onChange={(event) => setSort(event.target.value)}>
             <option value="natural">Tên tự nhiên</option>
@@ -619,6 +623,7 @@ export default function LibraryTab({ online, session }: Props) {
             onChange={(event) => setTagFilter(event.target.value)}
           />
         </div>
+        </details>
 
         <div className="toolbar">
           <button type="button" disabled={!online || scanning || !project} onClick={() => void runScan()}>
@@ -688,7 +693,7 @@ export default function LibraryTab({ online, session }: Props) {
 
       <section className="panel panel--center" aria-label="Video player">
         <div className="panel__head">
-          <h2>2 · Video player</h2>
+          <h2>Preview / Player</h2>
           {activeAsset ? (
             <span className="badge">
               {activeAsset.codec ?? "—"} · {formatBytes(activeAsset.size_bytes)}
@@ -750,35 +755,6 @@ export default function LibraryTab({ online, session }: Props) {
                 />
               </div>
             </div>
-            <SamplingPanel
-              asset={activeAsset}
-              online={online}
-              onCompleted={(assetId) => {
-                void (async () => {
-                  try {
-                    const fresh = await getAsset(assetId);
-                    patchAsset(assetId, () => fresh);
-                  } catch {
-                    // A refresh failure must not hide the completed state already shown.
-                  }
-                })();
-              }}
-            />
-            <VisionPanel
-              asset={activeAsset}
-              projectId={project?.project_id ?? ""}
-              online={online}
-              onCompleted={(assetId) => {
-                void (async () => {
-                  try {
-                    const fresh = await getAsset(assetId);
-                    patchAsset(assetId, () => fresh);
-                  } catch {
-                    // keep the summary already on screen
-                  }
-                })();
-              }}
-            />
             <p className="hint">
               Space play/pause · J/K/L · ←/→ 5s · I/O đặt In/Out · N ghi chú · [ ] clip trước/sau
             </p>
@@ -791,27 +767,69 @@ export default function LibraryTab({ online, session }: Props) {
         )}
       </section>
 
-      <NotesPanel
-        asset={activeAsset}
-        projectNotes={projectNotes}
-        clipNote={clipNote}
-        rangeNotes={rangeNotes}
-        draft={draft}
-        status={saveStatus}
-        errorMessage={saveError}
-        suggestion={suggestion}
-        inMs={inMs}
-        outMs={outMs}
-        onChangeDraft={setDraft}
-        onFlush={() => void flushNow()}
-        onReload={() => void reloadConflict()}
-        onUseSuggestion={() => void useSuggestion()}
-        onCreateRange={(text) => void createRangeNote(text)}
-        onCreateProjectNote={(text) => void createProjectNote(text)}
-        onDeleteNote={(note) => void removeNote(note)}
-        onSeek={(ms) => controllerRef.current?.seekTo(ms)}
-        onSetIn={() => setInMs(controllerRef.current?.currentMs() ?? 0)}
-        onSetOut={() => setOutMs(controllerRef.current?.currentMs() ?? 0)}
+      <InspectorTabs
+        filename={activeAsset?.filename ?? null}
+        notes={
+          <NotesPanel
+            asset={activeAsset}
+            projectNotes={projectNotes}
+            clipNote={clipNote}
+            rangeNotes={rangeNotes}
+            draft={draft}
+            status={saveStatus}
+            errorMessage={saveError}
+            suggestion={suggestion}
+            inMs={inMs}
+            outMs={outMs}
+            onChangeDraft={setDraft}
+            onFlush={() => void flushNow()}
+            onReload={() => void reloadConflict()}
+            onUseSuggestion={() => void useSuggestion()}
+            onCreateRange={(text) => void createRangeNote(text)}
+            onCreateProjectNote={(text) => void createProjectNote(text)}
+            onDeleteNote={(note) => void removeNote(note)}
+            onSeek={(ms) => controllerRef.current?.seekTo(ms)}
+            onSetIn={() => setInMs(controllerRef.current?.currentMs() ?? 0)}
+            onSetOut={() => setOutMs(controllerRef.current?.currentMs() ?? 0)}
+          />
+        }
+        analysis={
+          activeAsset ? (
+            <div className="inspector-analysis">
+              <SamplingPanel
+                asset={activeAsset}
+                online={online}
+                onCompleted={(assetId) => {
+                  void (async () => {
+                    try {
+                      const fresh = await getAsset(assetId);
+                      patchAsset(assetId, () => fresh);
+                    } catch {
+                      // keep the completed state already shown
+                    }
+                  })();
+                }}
+              />
+              <VisionPanel
+                asset={activeAsset}
+                projectId={project?.project_id ?? ""}
+                online={online}
+                onCompleted={(assetId) => {
+                  void (async () => {
+                    try {
+                      const fresh = await getAsset(assetId);
+                      patchAsset(assetId, () => fresh);
+                    } catch {
+                      // keep the summary already on screen
+                    }
+                  })();
+                }}
+              />
+            </div>
+          ) : (
+            <p className="hint">Chọn clip để chạy sampling và phân tích AI.</p>
+          )
+        }
       />
     </div>
   );

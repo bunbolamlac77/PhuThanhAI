@@ -65,7 +65,7 @@ export default function NotesPanel({
     return (
       <section className="panel" aria-label="Ghi chú">
         <div className="panel__head">
-          <h2>3 · Ghi chú</h2>
+          <h2>Ghi chú</h2>
         </div>
         <div className="empty-state">
           <p className="empty-state__title">Chọn một clip để ghi chú</p>
@@ -79,7 +79,7 @@ export default function NotesPanel({
   return (
     <section className="panel" aria-label="Ghi chú">
       <div className="panel__head">
-        <h2>3 · Ghi chú</h2>
+        <h2>Ghi chú</h2>
         <span className={`badge ${status === "saved" ? "badge--ok" : status === "conflict" || status === "error" ? "badge--danger" : ""}`}>
           {STATUS_TEXT[status]}
         </span>
