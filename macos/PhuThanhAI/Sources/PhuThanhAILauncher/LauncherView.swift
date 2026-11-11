@@ -9,6 +9,13 @@ struct WebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: "window.__PHUTHANHAI_EMBEDDED__ = true;",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false

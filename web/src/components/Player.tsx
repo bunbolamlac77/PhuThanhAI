@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset } from "../api";
-import { ApiError, assetStreamUrl, createProxy, proxyStreamUrl } from "../api";
+import { ApiError, assetStreamUrl, createProxy, proxyStreamUrl, thumbnailUrl } from "../api";
 import { formatTimecode } from "../lib/format";
 
 export interface PlayerController {
@@ -19,8 +19,17 @@ interface Props {
 
 type Mode = "direct" | "proxy";
 
+function embeddedWebKit(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent;
+  const injected = Boolean((window as unknown as { __PHUTHANHAI_EMBEDDED__?: boolean }).__PHUTHANHAI_EMBEDDED__);
+  const hasWebKitBridge = Boolean((window as unknown as { webkit?: { messageHandlers?: unknown } }).webkit?.messageHandlers);
+  return injected || (hasWebKitBridge && !/Chrome|Chromium|Edg\//.test(ua));
+}
+
 export default function Player({ asset, onTime, onController }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [src, setSrc] = useState(() => assetStreamUrl(asset.asset_id));
   const [mode, setMode] = useState<Mode>("direct");
   const [error, setError] = useState<string | null>(null);
@@ -91,17 +100,95 @@ export default function Player({ asset, onTime, onController }: Props) {
     }
   }, [mode, switchToProxy]);
 
+  const codec = (asset.codec ?? "").toLowerCase();
+  // WKWebView decodes HEVC into frames but composites them black. H.264 paints
+  // correctly, so non-H.264 sources use the existing on-demand H.264 proxy.
+  const needsProxy = embeddedWebKit() && codec !== "h264" && codec !== "";
+
+  useEffect(() => {
+    if (needsProxy && mode === "direct" && !proxyBusy) {
+      void switchToProxy();
+    }
+  }, [needsProxy, mode, proxyBusy, switchToProxy, asset.asset_id]);
+
+  const embedded = embeddedWebKit();
+
+  useEffect(() => {
+    if (!embedded) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    let raf = 0;
+    let last = 0;
+
+    const draw = () => {
+      const cw = canvas.clientWidth;
+      const ch = canvas.clientHeight;
+      if (!cw || !ch) return;
+      if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
+      }
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (video.readyState < 2 || !vw || !vh) return;
+      const scale = Math.min(cw / vw, ch / vh);
+      const dw = vw * scale;
+      const dh = vh * scale;
+      context.fillStyle = "#05080d";
+      context.fillRect(0, 0, cw, ch);
+      context.drawImage(video, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+    };
+
+    const tick = (time: number) => {
+      if (time - last > 33) {
+        draw();
+        last = time;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const redraw = () => draw();
+    video.addEventListener("seeked", redraw);
+    video.addEventListener("loadeddata", redraw);
+    video.addEventListener("pause", redraw);
+    return () => {
+      cancelAnimationFrame(raf);
+      video.removeEventListener("seeked", redraw);
+      video.removeEventListener("loadeddata", redraw);
+      video.removeEventListener("pause", redraw);
+    };
+  }, [embedded, src]);
+
   const durationMs = asset.duration_ms ?? 0;
 
   return (
     <div className="player">
       <div className="player__stage">
+        {embedded ? (
+          <>
+            <img className="player__poster" src={thumbnailUrl(asset.asset_id)} alt="" aria-hidden="true" />
+            <canvas ref={canvasRef} className="player__canvas" aria-hidden="true" />
+          </>
+        ) : null}
         <video
+          key={src}
+          style={embedded ? { opacity: 0 } : undefined}
           ref={videoRef}
           src={src}
-          preload="metadata"
+          poster={thumbnailUrl(asset.asset_id)}
+          preload="auto"
           playsInline
           onError={handleError}
+          onLoadedMetadata={(event) => {
+            // Paint a real frame instead of a black stage before the first play.
+            const video = event.currentTarget;
+            if (video.currentTime === 0 && Number.isFinite(video.duration) && video.duration > 0) {
+              video.currentTime = Math.min(0.05, video.duration / 10);
+            }
+          }}
           onTimeUpdate={(event) => {
             const ms = Math.round(event.currentTarget.currentTime * 1000);
             setCurrentMs(ms);
@@ -146,6 +233,9 @@ export default function Player({ asset, onTime, onController }: Props) {
         <span className={mode === "proxy" ? "badge badge--warn" : "badge"}>
           {mode === "proxy" ? "proxy H.264" : "nguồn trực tiếp"}
         </span>
+        {needsProxy && mode === "proxy" ? (
+          <span className="hint">WKWebView: dùng proxy H.264 để hiển thị hình</span>
+        ) : null}
       </div>
 
       <input

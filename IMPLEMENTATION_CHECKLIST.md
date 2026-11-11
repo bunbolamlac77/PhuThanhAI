@@ -282,4 +282,6 @@ under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
 - [x] Automated Studio UI E2E: layout ratios, tabs, draft preservation, fallback, resize, keyboard.
 - [x] Full pytest, S01 1,000/54 E2E, note flow, app self-test (8/8 codecs, automated a11y).
 - [x] Real WKWebView screenshot `artifacts/qa/S05/studio_app2.png`.
+- [x] WKWebView video visibility: HEVC/ProRes auto-proxy to H.264 + canvas frame
+      rendering; portrait video visible (`player_snapshot.png`, `video_fix_selftest.json`).
 - [ ] Manual visual review of spacing/typography by project owner (requested next).

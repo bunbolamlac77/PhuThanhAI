@@ -240,6 +240,12 @@ sampling/AI polling survive tab switches.
 
 - Advanced library filters are collapsed under "Bộ lọc nâng cao".
 - Player shortcuts are suppressed when focus is on a button, tab or summary.
+- WKWebView video fix: the native HEVC/ProRes video layer composited black even
+  though frames decoded. Inside WKWebView the Player now (a) loads a poster and
+  decodes the first frame, (b) automatically uses the on-demand H.264 proxy for
+  non-H.264 codecs (visible "proxy H.264" status; first 4K proxy took ~33 s, then
+  cached), and (c) draws decoded frames onto a canvas overlay so portrait video is
+  actually visible and captured. Chrome keeps direct playback.
 - Thumbnail failures show a film-strip fallback ("Không có ảnh xem trước") instead
   of a broken image. Root cause of the app failure was ffmpeg discovery under the
   Finder-minimal PATH; `find_tool` now falls back to `/opt/homebrew/bin` and
