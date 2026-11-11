@@ -49,14 +49,38 @@ the scaffold is compiled directly with `swiftc` against `MacOSX26.5.sdk` instead
 
 ## S01 — Media Library / Quick Preview / Notes — Gate G1
 
-- [ ] Scan folder idempotent, file permission/symlink loop/corrupt file không crash; asset UUID bền vững.
-- [ ] SQLite WAL + migrate, projects/assets/annotations/review/jobs/cache; backup restore làm được.
-- [ ] Grid/list virtualized + tìm/ lọc/ tag/star/rating; test **1,000 fake assets** và fixtures thật.
-- [ ] Playback H264/HEVC/MOV/ProRes có fallback proxy on-demand; HTTP Range 206, chỉ một video player hoạt động.
-- [ ] Seek, keyboard shortcuts, in/out và clip next/prev; timecode source/proxy mapping đúng golden.
-- [ ] Note clip/project/time range, `wall_clock=05:00` không thành PTS; autosave flush, 409 revision conflict, kill/restart không mất note đã xác nhận lưu.
-- [ ] File source read-only, proxy cache bounded LRU, no background transcode toàn thư viện.
-- [ ] G1 report có p95 library load/scroll/notes latency + screenshot và test thật.
+> **AI-run result on 2026-11-11** (`MacBookPro18,3`, macOS 26.7.1): **G1 PASS (10/10 gate steps, 185 tests)**.
+> Evidence: `artifacts/qa/S01/{gate.md,gate.json,pytest.xml,bench.json,scan_real.json,api.json,security.json,resources.json,restart.json,e2e/}`.
+> Regenerate: `PHUTHANHAI_TEST_FOOTAGE=<footage> python3 tools/run_s01_gate.py`.
+> No commit hash is printed here; the milestone commit is in git history.
+
+- [x] Scan folder idempotent, file permission/symlink loop/corrupt file không crash; asset UUID bền vững.
+      → scanner tracks `(dev,ino)`, skips symlinks, records corrupt files as `source_state=error`, re-scan `added=0`;
+      asset ids stable across scans. 1,000 synthetic + 54 real clips.
+- [x] SQLite WAL + migrate, projects/assets/annotations/review/jobs/cache; backup restore làm được.
+      → 7 tables, `PRAGMA user_version`, WAL + busy_timeout, `BEGIN IMMEDIATE` writer, SQLite backup API tested.
+- [x] Grid/list virtualized + tìm/ lọc/ tag/star/rating; test **1,000 fake assets** và fixtures thật.
+      → 1,000 assets render **18 DOM cards**; natural sort/search/rating/favorite/tag filters; batch favourite.
+- [x] Playback H264/HEVC/MOV/ProRes có fallback proxy on-demand; HTTP Range 206, chỉ một video player hoạt động.
+      → H.264 and 4K HEVC portrait play in Chrome (`readyState 4`, 2160×3840); HEVC→H.264 720×1280 proxy on
+      demand, duration delta 0 ms; Range 206/416 verified; exactly one `<video>` element. **ProRes N/A** (no fixture).
+- [x] Seek, keyboard shortcuts, in/out và clip next/prev; timecode source/proxy mapping đúng golden.
+      → shortcuts implemented (IME/text guard); E2E asserts `]`/`[` navigation and playback; proxy mapping probed
+      against source duration. Space/J/K/L/I/O use the same handler but are not browser-asserted.
+- [x] Note clip/project/time range, `wall_clock=05:00` không thành PTS; autosave flush, 409 revision conflict,
+      kill/restart không mất note đã xác nhận lưu.
+      → clip + project + time-range notes; suggestion `05:00` only after user accepts; `start_ms` stays null after
+      restart; stale revision 409; E2E typed inside the debounce window, switched clip, note flushed with no
+      cross-clip leak; note survives backend restart.
+- [x] File source read-only, proxy cache bounded LRU, no background transcode toàn thư viện.
+      → source size/mtime unchanged after scans; thumbnails/proxies only under `caches/`; LRU quota eviction never
+      touches source; proxy generated only when requested.
+- [x] G1 report có p95 library load/scroll/notes latency + screenshot và test thật.
+      → list p95 4.26 ms, search p95 4.65 ms, note save p95 1.60 ms; server RSS 57.9 MiB; screenshots
+      `artifacts/qa/S01/e2e/{bench,real,ui_flow}.png`.
+
+**G1 limitations:** ProRes untested (no fixture); WKWebView/`.app`/Spotlight remain S05; collections/playlists not
+implemented; E2E runs in headless Chrome, not WKWebView.
 
 ## S02 — Two-pass Sampling/PTS/Checkpoint — Gate G2
 

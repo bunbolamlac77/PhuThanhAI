@@ -35,7 +35,114 @@ export interface ContractCheck {
   checksum_tamper_rejected: boolean;
 }
 
+export interface Project {
+  project_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  revision: number;
+  asset_count?: number | null;
+}
+
+export interface Review {
+  status: "unreviewed" | "in_review" | "reviewed" | "needs_attention";
+  rating: number | null;
+  favorite: boolean;
+  labels: string[];
+  selected_ranges: Array<{ start_ms: number; end_ms: number }>;
+  last_playhead_ms: number | null;
+  revision: number;
+}
+
+export interface Asset {
+  asset_id: string;
+  project_id: string;
+  filename: string;
+  duration_ms: number | null;
+  width: number | null;
+  height: number | null;
+  rotation: number;
+  fps_nominal: string | null;
+  codec: string | null;
+  has_audio: boolean;
+  vfr_hint: boolean;
+  color_transfer: string | null;
+  preview_status: string;
+  analysis_status: string;
+  source_state: string;
+  error_code?: string | null;
+  size_bytes: number;
+  created_at: string;
+  updated_at: string;
+  review?: Review;
+  note_count?: number;
+}
+
+export interface AssetPage {
+  items: Asset[];
+  next_cursor: string | null;
+  total: number;
+}
+
+export interface Annotation {
+  annotation_id: string;
+  project_id: string;
+  asset_id: string | null;
+  scope: "project" | "clip" | "time_range";
+  start_ms: number | null;
+  end_ms: number | null;
+  text: string;
+  note_type: string;
+  source: string;
+  assertion_status: string;
+  wall_clock: { time_of_day: string; date: string | null; timezone: string | null; precision: string } | null;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnnotationMutation {
+  annotation: Annotation;
+  wall_clock_suggestion: { time_of_day: string; precision: string } | null;
+}
+
+export interface ScanResult {
+  project_id: string;
+  root: string;
+  scanned_dirs: number;
+  candidates: number;
+  added: number;
+  updated: number;
+  unchanged: number;
+  skipped_symlinks: number;
+  skipped_non_video: number;
+  errors: Array<{ path: string; code: string; message: string }>;
+  truncated: boolean;
+  elapsed_s: number;
+}
+
+export interface PreviewInfo {
+  asset_id: string;
+  mode: "direct" | "proxy";
+  source_available: boolean;
+  codec: string | null;
+  rotation: number;
+  duration_ms: number | null;
+  stream_url: string;
+  thumbnail_url: string;
+  proxy_available: boolean;
+  proxy_url: string | null;
+}
+
 const API = "/api/v1";
+
+let capability: string | null = null;
+let capabilityHeader = "X-PhuThanhAI-Capability";
+
+export function setSession(info: SessionInfo | null): void {
+  capability = info?.capability ?? null;
+  if (info?.header_name) capabilityHeader = info.header_name;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
@@ -45,15 +152,41 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     let code = `HTTP_${response.status}`;
+    let message = "";
     try {
-      const body = (await response.json()) as { code?: string };
+      const body = (await response.json()) as { code?: string; user_message?: string };
       if (body.code) code = body.code;
+      if (body.user_message) message = body.user_message;
     } catch {
-      // Body was not JSON; keep the status code.
+      // Non-JSON body; keep the status code.
     }
-    throw new Error(code);
+    throw new ApiError(code, message || code, response.status);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+export class ApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+async function mutate<T>(path: string, method: string, body?: unknown): Promise<T> {
+  if (!capability) throw new ApiError("NO_SESSION", "Chưa có capability phiên làm việc", 401);
+  const init: RequestInit = {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      [capabilityHeader]: capability,
+    },
+  };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  return request<T>(path, init);
 }
 
 export function fetchHealth(): Promise<Health> {
@@ -68,9 +201,154 @@ export function fetchContracts(): Promise<ContractCheck> {
   return request<ContractCheck>("/contracts");
 }
 
-export async function recheckContracts(session: SessionInfo): Promise<ContractCheck> {
-  return request<ContractCheck>("/contracts:recheck", {
-    method: "POST",
-    headers: { [session.header_name]: session.capability },
+export function recheckContracts(): Promise<ContractCheck> {
+  return mutate<ContractCheck>("/contracts:recheck", "POST");
+}
+
+export function listProjects(): Promise<Project[]> {
+  return request<Project[]>("/projects");
+}
+
+export function createProject(name: string, rootPath: string): Promise<Project> {
+  return mutate<Project>("/projects", "POST", { name, root_path: rootPath });
+}
+
+export function scanProject(projectId: string, directory?: string): Promise<ScanResult> {
+  return mutate<ScanResult>(`/projects/${projectId}/assets:scan`, "POST", directory ? { directory } : {});
+}
+
+export interface AssetQuery {
+  projectId: string;
+  q?: string | undefined;
+  cursor?: string | null | undefined;
+  limit?: number | undefined;
+  sort?: string | undefined;
+  favorite?: boolean | undefined;
+  minRating?: number | undefined;
+  hasNote?: boolean | undefined;
+  sourceState?: string | undefined;
+  label?: string | undefined;
+}
+
+export function listAssets(query: AssetQuery): Promise<AssetPage> {
+  const params = new URLSearchParams({ project_id: query.projectId });
+  if (query.q) params.set("q", query.q);
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.sort) params.set("sort", query.sort);
+  if (query.favorite !== undefined) params.set("favorite", String(query.favorite));
+  if (query.minRating !== undefined) params.set("min_rating", String(query.minRating));
+  if (query.hasNote !== undefined) params.set("has_note", String(query.hasNote));
+  if (query.sourceState) params.set("source_state", query.sourceState);
+  if (query.label) params.set("label", query.label);
+  return request<AssetPage>(`/assets?${params.toString()}`);
+}
+
+export function getAsset(assetId: string): Promise<Asset> {
+  return request<Asset>(`/assets/${assetId}`);
+}
+
+export function listAnnotations(projectId: string, assetId?: string): Promise<Annotation[]> {
+  const suffix = assetId ? `?asset_id=${encodeURIComponent(assetId)}` : "";
+  return request<Annotation[]>(`/projects/${projectId}/annotations${suffix}`);
+}
+
+export function createAssetAnnotation(
+  projectId: string,
+  payload: {
+    scope: "clip" | "time_range";
+    asset_id: string;
+    start_ms?: number | null | undefined;
+    end_ms?: number | null | undefined;
+    text: string;
+    note_type?: string | undefined;
+    wall_clock?: { time_of_day: string; precision: "time_of_day" | "date_time" } | null | undefined;
+  },
+): Promise<AnnotationMutation> {
+  return mutate<AnnotationMutation>(`/projects/${projectId}/annotations`, "POST", payload);
+}
+
+export function createProjectAnnotation(
+  projectId: string,
+  text: string,
+): Promise<AnnotationMutation> {
+  return mutate<AnnotationMutation>(`/projects/${projectId}/annotations`, "POST", {
+    scope: "project",
+    text,
   });
+}
+
+export function updateAnnotation(
+  annotationId: string,
+  payload: {
+    expected_revision: number;
+    text: string;
+    note_type?: string | undefined;
+    start_ms?: number | null | undefined;
+    end_ms?: number | null | undefined;
+    wall_clock?: { time_of_day: string; precision: "time_of_day" | "date_time" } | null | undefined;
+  },
+): Promise<AnnotationMutation> {
+  return mutate<AnnotationMutation>(`/annotations/${annotationId}`, "PUT", payload);
+}
+
+export function deleteAnnotation(annotationId: string, expectedRevision: number): Promise<void> {
+  return mutate<void>(`/annotations/${annotationId}?expected_revision=${expectedRevision}`, "DELETE");
+}
+
+/** Best-effort save on window close. Uses `keepalive` so the request survives unload. */
+export function recordAnnotationUpdateKeepalive(
+  annotationId: string,
+  payload: { expected_revision: number; text: string },
+): void {
+  if (!capability) return;
+  void fetch(`${API}/annotations/${annotationId}`, {
+    method: "PUT",
+    keepalive: true,
+    headers: { "Content-Type": "application/json", [capabilityHeader]: capability },
+    body: JSON.stringify(payload),
+  }).catch(() => undefined);
+}
+
+export function getReview(assetId: string): Promise<Review> {
+  return request<Review>(`/assets/${assetId}/review`);
+}
+
+export function putReview(
+  assetId: string,
+  payload: {
+    expected_revision?: number | undefined;
+    status?: Review["status"] | undefined;
+    rating?: number | null | undefined;
+    favorite?: boolean | undefined;
+    labels?: string[] | undefined;
+    selected_ranges?: Array<{ start_ms: number; end_ms: number }> | undefined;
+    last_playhead_ms?: number | null | undefined;
+  },
+): Promise<Review> {
+  return mutate<Review>(`/assets/${assetId}/review`, "PUT", payload);
+}
+
+export function previewInfo(assetId: string): Promise<PreviewInfo> {
+  return request<PreviewInfo>(`/assets/${assetId}/preview`);
+}
+
+export function createProxy(assetId: string): Promise<{ asset_id: string; created: boolean; url: string }> {
+  return mutate<{ asset_id: string; created: boolean; url: string }>(`/assets/${assetId}/proxy`, "POST");
+}
+
+export function assetStreamUrl(assetId: string): string {
+  return `${API}/assets/${assetId}/stream`;
+}
+
+export function proxyStreamUrl(assetId: string): string {
+  return `${API}/assets/${assetId}/proxy-stream`;
+}
+
+export function thumbnailUrl(assetId: string): string {
+  return `${API}/assets/${assetId}/thumbnail`;
+}
+
+export function cacheStats(): Promise<{ quota_bytes: number; kinds: Record<string, { entries: number; bytes: number }> }> {
+  return request("/cache");
 }

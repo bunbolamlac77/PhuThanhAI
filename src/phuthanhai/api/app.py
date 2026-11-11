@@ -29,6 +29,8 @@ from phuthanhai.api.routes import router
 from phuthanhai.api.security import SecurityMiddleware, SecurityPolicy
 from phuthanhai.config import OFFLINE_ENVIRONMENT, Settings
 from phuthanhai.contracts.validators import ContractError
+from phuthanhai.library.service import LibraryService
+from phuthanhai.library.store import StoreError
 from phuthanhai.runtime.scheduler import PROCESSES
 from phuthanhai.utils.fs import atomic_write_json
 from phuthanhai.utils.logging import configure, get_logger
@@ -88,6 +90,8 @@ def create_app(
             allowed_origins=policy.allowed_origins,
         )
 
+    library = LibraryService(settings)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings.data.ensure()
@@ -110,6 +114,7 @@ def create_app(
             try:
                 yield
             finally:
+                library.close()
                 terminated = PROCESSES.shutdown()
                 try:
                     session_path.unlink(missing_ok=True)
@@ -130,11 +135,23 @@ def create_app(
     )
     app.state.settings = settings
     app.state.policy = policy
+    app.state.library = library
     app.state.pid = os.getpid()
     app.state.started_at = time.monotonic()
 
     app.add_middleware(SecurityMiddleware, policy=policy)
     app.include_router(router)
+
+    @app.exception_handler(StoreError)
+    async def store_error_handler(_: Request, exc: StoreError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status,
+            content={
+                "code": exc.code,
+                "user_message": str(exc),
+                "retryable": exc.status >= 500,
+            },
+        )
 
     @app.exception_handler(ContractError)
     async def contract_error_handler(_: Request, exc: ContractError) -> JSONResponse:

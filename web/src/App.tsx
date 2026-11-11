@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchHealth, fetchSession, type Health, type SessionInfo } from "./api";
+import { fetchHealth, fetchSession, setSession, type Health, type SessionInfo } from "./api";
 import LibraryTab from "./tabs/LibraryTab";
 import PovTab from "./tabs/PovTab";
 import PlaceholderTab from "./tabs/PlaceholderTab";
@@ -69,6 +69,7 @@ export default function App() {
       } catch {
         session = null;
       }
+      setSession(session);
       setConnection({ state: "online", health, session });
     } catch (error) {
       setConnection({ state: "offline", code: error instanceof Error ? error.message : "UNKNOWN" });
@@ -145,7 +146,7 @@ export default function App() {
       <main className="app-body">{body}</main>
 
       <footer className="app-footer">
-        <span>S00 · Foundation &amp; Doctor — thư viện, player và ghi chú thuộc S01.</span>
+        <span>S01 · Media Library — Video Analyzer (S02–S03) chưa triển khai.</span>
         <button type="button" className="link-button" onClick={() => void bootstrap()}>
           Kiểm tra lại backend
         </button>

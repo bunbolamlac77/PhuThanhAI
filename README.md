@@ -2,9 +2,9 @@
 
 Local-first, offline video library / analyzer for macOS Apple Silicon.
 
-This repository is being built milestone by milestone. **Current state: S00 (Foundation & Doctor) only.**
-The media library, player, notes persistence, sampler and VLM pipeline arrive in S01–S03; the POV tab stays a
-placeholder until G0–G5 pass. Nothing here claims a gate has passed; gate evidence lives in `artifacts/qa/`.
+This repository is being built milestone by milestone. **Current state: S01 (Media Library, Quick Preview, Notes).**
+The video analyzer pipeline (adaptive sampling, Qwen3-VL evidence, reports) is S02–S03; the POV tab stays locked
+until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
 
 ## Layout
 
@@ -20,7 +20,14 @@ src/phuthanhai/                 application package
   runtime/{scheduler,resource,checkpoint}.py
   analyzer/{probe,sampler,vlm_worker}.py
   utils/{fs,hashes,logging}.py
-  library/, pov/                explicit placeholders (no fake implementations)
+  library/
+    db.py                       SQLite WAL registry + migrations
+    store.py                    assets/annotations/reviews/cache repositories
+    index.py                    read-only, symlink-safe, idempotent folder scanner
+    preview.py                  thumbnails, HTTP Range, on-demand proxy, LRU cache
+    notes.py                    wall-clock suggestion + annotation scope rules
+    service.py                  composition layer used by API and tests
+  pov/                          locked until G5 (no engine)
 web/                            React + TypeScript + Vite shell, four tabs, bundled offline
 macos/PhuThanhAI/               thin SwiftUI + WKWebView launcher scaffold (SwiftPM)
 tests/                          unit + integration tests (stdlib unittest; pytest-compatible)
@@ -40,6 +47,10 @@ uv run phuthanhai validate --input tests/fixtures/golden_v3.workspace_report_por
 python3 tools/validate_specs.py             # contract-only QA, no model, no app
 python3 -m unittest discover -s tests -v    # test suite (pytest can collect the same files)
 python3 tools/run_s00_gate.py --source /path/to/footage.mp4   # regenerate artifacts/qa/S00 evidence
+python3 tools/run_s01_e2e.py                 # Chrome E2E: 1,000-asset DOM + real playback
+python3 tools/run_s01_ui_flow.py             # Chrome E2E: type note, save, wall-clock, clip switch
+PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
+  python3 tools/run_s01_gate.py              # regenerate artifacts/qa/S01 evidence
 ```
 
 ## Environment separation (non-negotiable)
@@ -81,9 +92,45 @@ descriptions of private footage - see `artifacts/README.md`). Measured, not esti
 | Server security | bad host 400 · bad origin 403 · traversal 400 · POST without capability 403 · session file `0600` |
 | Process hygiene | 0 leftover worker/server processes after the run |
 
-## Known limitations at S00
+## S01 gate result on this machine (2026-11-11)
 
-- Media library, playback, HTTP Range streaming, notes persistence and adaptive sampling are **not implemented yet** (S01–S02).
+`PHUTHANHAI_TEST_FOOTAGE=<real footage> python3 tools/run_s01_gate.py` → **verdict PASS** (10/10 steps).
+Evidence in `artifacts/qa/S01/` (local-only). Measured:
+
+| Fact | Measured value |
+|---|---|
+| Tests | 185 passed, 0 failed, 0 skipped |
+| Scan 1,000 synthetic assets | 1000 added, 0 errors, 55.5 s (≈18 files/s) |
+| Scan real footage | 54 clips, 0 errors, 3.1 s, source bytes/mtime unchanged |
+| HEVC → H.264 proxy | 720×1280, duration delta 0 ms, on demand only |
+| Library list p95 (HTTP) | 4.26 ms for 100 rows of 1,000 |
+| Search p95 (HTTP) | 4.65 ms |
+| Note save p95 (HTTP) | 1.60 ms |
+| Range responses | 206 with `Content-Range`, 416 with `bytes */size` |
+| Stale note revision | 409 `ANNOTATION_CONFLICT`, no overwrite |
+| Server RSS | 57.9 MiB (no model loaded) |
+| Data root (DB + thumbs + proxy) | 14.2 MiB for the gate dataset |
+| Browser E2E, 1,000 rows | 18 DOM cards (virtualized), total label "1000", playback readyState 4 |
+| Browser E2E, real HEVC | 2160×3840 decoded, readyState 4 |
+| Browser E2E, notes | typed → saved → wall-clock 05:00 applied, `start_ms` null |
+| Flush on clip switch | typed inside the debounce window, switched with `]`, note persisted with no cross-clip leak |
+| Security | foreign host 400 · foreign origin 403 · no capability 403 · traversal 400 |
+| Restart | note still present after backend restart |
+| Orphan processes | 0 |
+
+The S01 E2E caught two real defects that unit tests could not: a virtualizer that measured a 0×0 container
+(one column for 1,000 clips) and a clip switch that briefly kept the previous draft in the editor (risk of writing
+clip A's note onto clip B). Both are fixed and regression-guarded.
+
+## Known limitations (S00–S01)
+
+- The **video analyzer** (two-pass sampling, VLM evidence, reports) is not implemented yet (S02–S03); no AI runs when using the library.
+- **POV** is hard-locked until G0–G5 pass (`POV_LOCKED_UNTIL_G5`).
+- Tags are review labels with a filter and editor; **collections/playlists** are not implemented.
+- **ProRes** footage was not available to test; HEVC 4K portrait direct playback and H.264 proxy fallback were verified.
+- Keyboard: shortcuts, in/out marking and clip navigation are implemented; the E2E asserts typing, `]`/`[` navigation
+  and flush-on-switch. Space/seek/I/O are exercised through the same handler but not browser-asserted.
+- Browser E2E uses headless Chrome (GPU enabled for HEVC); **WKWebView is still not exercised**, and `.app`/Spotlight remain S05.
 - Frame extraction is rotation-agnostic (FFmpeg autorotate + longest-edge cap) and verified on portrait HEVC; VFR/PTS policy is S02.
   The API exposes no asset endpoints, and the UI shows explicit empty states rather than fake data.
 - `AI_HEAVY` slot arbitration exists and is unit-tested, but no job queue/worker pool is wired until S03.
