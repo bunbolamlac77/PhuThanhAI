@@ -202,6 +202,7 @@ class VisionService:
         batch_size: int = DEFAULT_BATCH_SIZE,
         request_timeout_s: float = DEFAULT_TIMEOUT_S,
         allow_multi_frame: bool = False,
+        require_governor: bool = True,
     ) -> None:
         self.db = db
         self.settings = settings
@@ -216,6 +217,7 @@ class VisionService:
         self._mlx_peak = 0
         self.request_timeout_s = request_timeout_s
         self.allow_multi_frame = allow_multi_frame
+        self.require_governor = require_governor
         settings.data.inference.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     @staticmethod
@@ -540,9 +542,10 @@ class VisionService:
                 )
 
             batch = pending[start : start + self.batch_size]
-            allowed, reason = GOVERNOR.can_start_heavy_worker()
-            if not allowed:
-                raise VisionError(reason, "resource governor refused a heavy worker")
+            if self.require_governor:
+                allowed, reason = GOVERNOR.can_start_heavy_worker()
+                if not allowed:
+                    raise VisionError(reason, "resource governor refused a heavy worker")
             owner = job_id or analysis_id
             try:
                 HEAVY_SLOT.acquire(owner, timeout=self.request_timeout_s)

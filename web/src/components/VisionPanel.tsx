@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AnalysisMethod, AnalysisSummary, Asset, SamplingJob } from "../api";
 import { cancelJob, fetchAnalysis, getJob, startAnalysis } from "../api";
+import ContextPanel from "./ContextPanel";
 
 interface Props {
   asset: Asset;
+  projectId: string;
   online: boolean;
   onCompleted: (assetId: string) => void;
 }
 
 const ACTIVE = new Set(["queued", "running", "cancelling"]);
 
-export default function VisionPanel({ asset, online, onCompleted }: Props) {
+export default function VisionPanel({ asset, projectId, online, onCompleted }: Props) {
   const [method, setMethod] = useState<AnalysisMethod>("auto");
   const [job, setJob] = useState<SamplingJob | null>(null);
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
@@ -166,6 +168,8 @@ export default function VisionPanel({ asset, online, onCompleted }: Props) {
           ) : null}
         </div>
       ) : null}
+
+      <ContextPanel asset={asset} projectId={projectId} online={online} />
     </div>
   );
 }

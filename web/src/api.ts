@@ -42,6 +42,8 @@ export interface Project {
   updated_at: string;
   revision: number;
   asset_count?: number | null;
+  analysis_profile?: string;
+  profile_revision?: number;
 }
 
 export interface Review {
@@ -454,4 +456,142 @@ export function startAnalysis(assetId: string, method: AnalysisMethod): Promise<
 
 export function fetchAnalysis(assetId: string): Promise<AnalysisSummary> {
   return request<AnalysisSummary>(`/assets/${assetId}/analysis`);
+}
+
+
+export type ContextLabelStatus = "confirmed" | "corrected" | "dismissed";
+
+export interface ContextCandidate {
+  label_key: string;
+  label_vi: string;
+  category: string;
+  status: string;
+  interpretation_level: "hypothesis";
+  description_vi: string;
+  uncertainty_vi: string;
+  signals: string[];
+  evidence_frames: string[];
+  evidence_scenes: string[];
+  evidence_times_ms: number[];
+}
+
+export interface ContextUserLabel {
+  label_key: string;
+  label_vi: string;
+  status: "user_confirmed" | "user_corrected";
+  annotation_id: string;
+  revision: number;
+  scene_id: string | null;
+  frame_id: string | null;
+  evidence_frames: string[];
+  evidence_times_ms: number[];
+  original_candidate: string | null;
+}
+
+export interface ContextScene {
+  scene_id: string;
+  start_ms: number;
+  end_ms: number;
+  frame_ids: string[];
+  candidates: ContextCandidate[];
+  user_labels: ContextUserLabel[];
+}
+
+export interface ContextOverlay {
+  profile: string;
+  profile_label_vi: string;
+  profile_version: string;
+  profile_revision: number | null;
+  raw_evidence_sha256: string;
+  coverage_status: string | null;
+  guardrails: string[];
+  candidates: ContextCandidate[];
+  unresolved: Array<{
+    label_key: string;
+    label_vi: string;
+    reason_vi: string;
+    evidence_frames: string[];
+  }>;
+  user_labels: ContextUserLabel[];
+  dismissed_label_keys: string[];
+  scenes: ContextScene[];
+}
+
+export function fetchProjectProfile(projectId: string): Promise<{
+  project_id: string;
+  analysis_profile: string;
+  profile_revision: number;
+}> {
+  return request(`/projects/${projectId}/profile`);
+}
+
+export function updateProjectProfile(
+  projectId: string,
+  profile: string,
+  expectedRevision: number
+): Promise<{ project_id: string; analysis_profile: string; profile_revision: number }> {
+  return mutate(`/projects/${projectId}/profile`, "PUT", {
+    profile,
+    expected_revision: expectedRevision,
+  });
+}
+
+export function fetchContext(assetId: string): Promise<ContextOverlay> {
+  return request<ContextOverlay>(`/assets/${assetId}/context`);
+}
+
+export function confirmContextLabel(
+  assetId: string,
+  payload: {
+    label_key: string;
+    label_vi?: string | null;
+    status: ContextLabelStatus;
+    scene_id?: string | null;
+    frame_id?: string | null;
+  }
+): Promise<ContextOverlay> {
+  return mutate<ContextOverlay>(`/assets/${assetId}/labels`, "POST", payload);
+}
+
+export function buildReports(projectId: string): Promise<{
+  project_id: string;
+  files: string[];
+  elapsed_s: number;
+  analysed_assets: number;
+  candidate_labels: number;
+  user_labels: number;
+}> {
+  return mutate(`/projects/${projectId}/reports`, "POST", { include_private_notes: false });
+}
+
+export function assetFrameUrl(assetId: string, frameId: string): string {
+  return `/api/v1/assets/${assetId}/frames/${frameId}`;
+}
+
+export function reportUrl(projectId: string, name: string): string {
+  return `/api/v1/projects/${projectId}/reports/${encodeURIComponent(name)}`;
+}
+
+
+export function contextReview(
+  assetId: string,
+  profile: string,
+  frameIds: string[]
+): Promise<{
+  review_id: string;
+  profile: string;
+  cached: boolean;
+  note_vi: string;
+  frames: Array<{
+    frame_id: string;
+    scene_id: string;
+    normalized_pts_ms: number;
+    observation: { description: string };
+    candidates: ContextCandidate[];
+  }>;
+}> {
+  return mutate(`/assets/${assetId}:context-review`, "POST", {
+    profile,
+    frame_ids: frameIds,
+  });
 }

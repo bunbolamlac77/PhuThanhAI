@@ -30,8 +30,10 @@ class Thresholds:
     # 10%/30% swap thresholds refused every inference on a normal desktop workload.
     pressured_available_ratio: float = 0.12
     critical_available_ratio: float = 0.05
-    pressured_swap_ratio: float = 0.75
-    critical_swap_ratio: float = 0.90
+    # S04 measured: inference completed with 6.7 GiB RAM available while macOS
+    # dynamic swap sat at 91.6%; swap occupancy alone is a weak signal there.
+    pressured_swap_ratio: float = 0.85
+    critical_swap_ratio: float = 0.97
     critical_pressure_free_pct: float = 10.0
     pressured_pressure_free_pct: float = 30.0
     min_free_disk_bytes: int = 5 * 1024**3

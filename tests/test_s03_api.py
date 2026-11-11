@@ -62,6 +62,7 @@ class AnalysisApiTests(unittest.TestCase):
             model_path=self.model,
             request_timeout_s=timeout,
             batch_size=8,
+            require_governor=False,
         )
 
     def tearDown(self) -> None:

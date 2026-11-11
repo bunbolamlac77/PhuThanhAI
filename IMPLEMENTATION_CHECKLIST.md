@@ -194,3 +194,20 @@ GATE: PASS | FAIL | NOT VERIFIED
 BLOCKERS/KNOWN LIMITATIONS: ...
 NEXT STEP: ... (nếu PASS)
 ```
+
+## S04 — Context Fusion, Presets, Vietnamese Wedding Recognition, Reports — Gate G4
+
+> **AI-run result on 2026-11-11** (`MacBookPro18,3`, macOS 26.7.1): **G4 PASS (12/12 steps, 297 tests, owner-confirmed labels)**.
+> Evidence: `artifacts/qa/S04/{gate.md,gate.json,device_metrics.json,context_evaluation.json,scenario_matrix.json,report_samples/}`.
+> Regenerate: `PHUTHANHAI_TEST_FOOTAGE=<footage> python3 tools/run_s04_gate.py`.
+
+- [x] Environment presets (general/wedding/event/vlog/documentary/POV/custom) persisted per project with revision-safe updates (409 on conflict).
+- [x] ContextOverlay derived from immutable raw evidence + profile + user labels; no raw prompt change, no inference on profile switch.
+- [x] Vietnamese wedding vocabulary (12 groups) with visual signals, uncertainties and frame references; altar/decoration/banquet distinction enforced.
+- [x] User confirm/correct/dismiss labels stored as annotations, provenance-tagged, survive restart and clip switching.
+- [x] Level-2 targeted review reuses worker/scheduler, strict schema, per-frame cache, single heavy slot, raw evidence untouched.
+- [x] AI and portable reports (video/project, V2 bundle, V3 package, portable markdown) validated against frozen contracts; private notes hidden by default.
+- [x] Real evaluation: 2 wedding clips + 2 controls, precision 0.800 / recall 0.444, 0 altar false positives on controls, unknown rate 0.167.
+- [x] 18-scenario matrix PASS (1–11 synthetic rule-level, 12–18 real/restart/contract/E2E), with coverage limits documented.
+
+**G4 limitations:** small real evaluation set (2 clips); scenarios 4–10 only rule-level; recall 0.444; no calibrated confidence; migration tested by reopen, not against a captured S03 DB; multi-clip inference is memory-bound.

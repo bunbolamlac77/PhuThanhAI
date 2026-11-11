@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -203,7 +203,23 @@ def _migration_v4(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4)
+def _migration_v5(conn: sqlite3.Connection) -> None:
+    """S04: per-project environment profile + user-confirmed context labels."""
+
+    for statement in (
+        "ALTER TABLE projects ADD COLUMN analysis_profile TEXT NOT NULL DEFAULT 'general'",
+        "ALTER TABLE projects ADD COLUMN profile_revision INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE annotations ADD COLUMN label_key TEXT",
+        "ALTER TABLE annotations ADD COLUMN label_status TEXT",
+        "ALTER TABLE annotations ADD COLUMN label_scene_id TEXT",
+        "ALTER TABLE annotations ADD COLUMN label_frame_id TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_annotations_context_label "
+        "ON annotations(project_id, asset_id, note_type)",
+    ):
+        conn.execute(statement)
+
+
+MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4, _migration_v5)
 
 
 class Database:

@@ -2,8 +2,8 @@
 
 Local-first, offline video library / analyzer for macOS Apple Silicon.
 
-This repository is being built milestone by milestone. **Current state: S03 (Qwen3-VL offline inference, scheduler, visual evidence).**
-Report assembly/context fusion is S04; the POV tab stays locked until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
+This repository is being built milestone by milestone. **Current state: S04 (context fusion, Vietnamese wedding presets, AI/portable reports).**
+The POV tab stays locked until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
 
 ## Layout
 
@@ -26,6 +26,9 @@ src/phuthanhai/                 application package
     sampling_pipeline.py        cache, checkpoints, resume, cancel, provenance
     vision_service.py           heavy slot, worker lifecycle, inference cache, evidence
     evidence.py                 VisualEvidenceSet validation (frame refs only)
+    context_profiles.py         environment presets + Vietnamese cultural vocabulary
+    context_fusion.py           ContextOverlay (hypothesis vs user-asserted)
+    report.py                   AI/portable report assembly + frozen V2/V3 packages
     vlm_worker.py               isolated Qwen3-VL subprocess protocol (JSONL v2)
   library/
     db.py                       SQLite WAL registry + migrations
@@ -63,6 +66,8 @@ PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s02_gate.py              # regenerate artifacts/qa/S02 evidence
 PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s03_gate.py              # regenerate artifacts/qa/S03 evidence (real inference)
+PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
+  python3 tools/run_s04_gate.py              # regenerate artifacts/qa/S04 evidence (context + reports)
 ```
 
 ## Environment separation (non-negotiable)
@@ -172,18 +177,35 @@ Evidence is local-only in `artifacts/qa/S02/`.
 | Offline | worker launched under `sandbox-exec` `(deny network*)` + in-process socket block; model loaded from local snapshot |
 | UI safety | notes created while real inference was running; S01 note/shortcut E2E still PASS |
 
-## Known limitations (S00–S03)
+## S04 gate result on this machine (2026-11-11)
 
-- **Video Analyzer report assembly is not implemented**: S03 produces a validated `VisualEvidenceSet`; context fusion, events and reports are S04. No user note is mixed into the visual prompt.
-- **POV** is hard-locked until G0–G5 pass (`POV_LOCKED_UNTIL_G5`).
-- **Multi-frame is disabled by evidence, not by preference**: `mlx-vlm 0.7.10` accepts multiple images, but the returned object failed the strict observation schema in every gate attempt. Multi-frame requests fall back to `sequential_frames`; the method name is never rewritten to `multi_frame`.
-- **Human content QA is a single owner-confirmed frame**, not a broad accuracy study. Other observations carry model uncertainty and are not independently verified.
-- **Memory numbers vary with desktop load** (browsers, this session). Swap delta changed between runs (0.03–0.38 GiB) because saturated swap was already in use; inference memory is reported separately from machine-wide swap.
-- **ResourceGovernor thresholds were recalibrated from measured runs** (4.1 GiB MLX peak completed at ~66% free memory). They remain provisional and are not a guarantee under all desktop workloads.
-- **No confidence numbers** are produced: the runtime exposes no calibrated probability, and fabricated confidence is rejected.
-- **Cancel granularity**: cancellation kills the worker process group (SIGTERM → SIGKILL → wait), but a single `generate()` call cannot be interrupted mid-token; the gate measures the resulting stop time.
-- **Negative start PTS** remains synthetic-only (FFmpeg rewrites negative timestamps); VFR/B-frames/non-zero fixtures are real.
-- **ProRes** is sampled in the fixture matrix but browser playback of ProRes was not verified.
-- **WKWebView/`.app`/Spotlight** remain S05; `swift build` still fails on this machine, so the launcher scaffold is compiled with `swiftc` against `MacOSX26.5.sdk`.
-- **Offline proof** is macOS `sandbox-exec` + in-process socket denial for the worker. The FastAPI process itself binds loopback only; there is no outbound model download path.
-- `artifacts/qa/` and real-footage paths stay out of git. The public repo contains source, tests, tools and docs only.
+`PHUTHANHAI_TEST_FOOTAGE=<footage> python3 tools/run_s04_gate.py` → **verdict PASS**
+(12/12 steps, owner-confirmed labels). Evidence stays local in `artifacts/qa/S04/`.
+
+| Fact | Measured value |
+|---|---|
+| Tests | 297 passed, 0 failed, 1 skipped (known S02 negative-start fixture gap) |
+| Profiles | 7 presets persisted per project; migration v5 keeps IDs, notes, evidence |
+| Context evaluation | 2 real wedding clips + 2 non-wedding controls: precision 0.800, recall 0.444 |
+| Altar safety | 0 altar false positives on controls; a shrine-like altar stayed `unresolved` instead of being over-claimed |
+| Unknown rate | 0.167 of emitted candidates/unresolved entries |
+| Profile switch | 0.001 s, raw evidence digest unchanged, **zero** worker/VLM calls |
+| Reports | project bundle / extension / package validate against frozen V2/V3; portable roundtrip PASS |
+| Privacy | private note absent in hidden report, present only when explicitly shared |
+| Targeted review | level 2 runs on one real frame, cached on repeat, raw evidence unchanged |
+| Scenario matrix | 18/18 (1–11 rule-level synthetic observations, 12–18 real/restart/contract/E2E) |
+| UI regression | player/notes/autosave/shortcuts PASS in Chrome |
+
+## Known limitations (S00–S04)
+
+- **Context recognition is conservative, not production-accurate.** On the two reviewed wedding clips recall was 0.444: a clear altar was reported as `unresolved` rather than confirmed, and preparation/offering labels were missed. Precision 0.800 was measured on 2 clips, not a general promise.
+- **Only 2 real wedding clips + 2 non-wedding controls were reviewed.** Scenarios 4–10 (family altar outside a wedding, unrelated worship space, wedding gate, trays, preparation, modern hall) are covered by rule-level synthetic observations, not real footage. The 18/18 matrix is not a real-world accuracy claim.
+- **Human QA covered 2 frames** (owner-confirmed). No broad inter-annotator study exists.
+- **No confidence numbers**: candidates are rule-derived hypotheses; user confirmation is stored as an annotation and labelled `user_asserted`.
+- **Sustained multi-clip inference is memory-bound**: macOS swap reached 91.6% while 6.7 GiB RAM was free; the governor now classifies that as `pressured` (not critical), and the gate waits between clips. Thresholds remain provisional.
+- **Targeted review** reuses the same Qwen3-VL worker with a context prompt; it does not train or add a second model. It is cached per frame hash/profile/prompt/model, but its labels still require user confirmation.
+- **S03 raw evidence is immutable**; changing a profile or confirming a label only rebuilds overlay/report. The report layer rejects fabricated refs and never turns a candidate into `observed`.
+- **Migration v5** was exercised by creating data and reopening the library; an automated upgrade test against a captured S03 database file is still missing.
+- **Report audio stance**: image-only analysis never claims to have heard or transcribed audio; reports with an audio stream carry `audio_not_transcribed`.
+- **POV remains locked** until G0–G5; S05 (app/Spotlight/WKWebView) is not started.
+- `artifacts/qa/` and real-footage paths stay out of git; the repository contains source, tests, tools and docs only.

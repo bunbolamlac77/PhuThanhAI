@@ -35,6 +35,13 @@ from phuthanhai.api.schemas import (
     JobOut,
     SampleRequest,
     SamplingSummary,
+    ContextLabelCreate,
+    ContextReviewRequest,
+    ProfileOut,
+    ProfileUpdate,
+    ReportBuildOut,
+    ReportBuildRequest,
+    ReportFilesOut,
     ScanRequest,
     ScanResponse,
 )
@@ -258,6 +265,86 @@ def analysis_summary(asset_id: str, request: Request) -> AnalysisSummary:
 @router.get("/assets/{asset_id}/sampling", response_model=SamplingSummary)
 def sampling_summary(asset_id: str, request: Request) -> SamplingSummary:
     return SamplingSummary.model_validate(_library(request).sampling_summary(asset_id))
+
+
+@router.get("/projects/{project_id}/profile", response_model=ProfileOut)
+def get_project_profile(project_id: str, request: Request) -> ProfileOut:
+    project = _library(request).get_project(project_id)
+    return ProfileOut.model_validate(project)
+
+
+@router.put("/projects/{project_id}/profile", response_model=ProfileOut)
+def set_project_profile(project_id: str, payload: ProfileUpdate, request: Request) -> ProfileOut:
+    project = _library(request).set_project_profile(
+        project_id, payload.profile, payload.expected_revision
+    )
+    return ProfileOut.model_validate(project)
+
+
+@router.get("/assets/{asset_id}/context")
+def asset_context(asset_id: str, request: Request) -> dict[str, Any]:
+    return _library(request).context_overlay(asset_id)
+
+
+@router.post("/assets/{asset_id}/labels")
+def confirm_context_label(
+    asset_id: str, payload: ContextLabelCreate, request: Request
+) -> dict[str, Any]:
+    return _library(request).confirm_label(
+        asset_id,
+        label_key=payload.label_key,
+        label_vi=payload.label_vi,
+        status=payload.status,
+        scene_id=payload.scene_id,
+        frame_id=payload.frame_id,
+    )
+
+
+@router.post("/assets/{asset_id}:context-review")
+def context_review(
+    asset_id: str, payload: ContextReviewRequest, request: Request
+) -> dict[str, Any]:
+    return _library(request).targeted_context_review(asset_id, payload.profile, payload.frame_ids)
+
+
+@router.get("/assets/{asset_id}/frames/{frame_id}")
+def asset_frame(asset_id: str, frame_id: str, request: Request) -> FileResponse:
+    library = _library(request)
+    asset = library.get_asset(asset_id)
+    manifest = (
+        library.pipeline.load_manifest(asset_id, asset["sampling_fingerprint"])
+        if asset.get("sampling_fingerprint")
+        else None
+    )
+    if manifest is None:
+        raise StoreError("SAMPLING_REQUIRED", "sampled frames are not available", status=404)
+    frame = next((item for item in manifest["frames"] if item["frame_id"] == frame_id), None)
+    if frame is None:
+        raise StoreError("FRAME_NOT_FOUND", "frame does not exist", status=404)
+    path = Path(frame["path"])
+    if not path.is_file():
+        raise StoreError("FRAME_NOT_FOUND", "frame image is missing", status=404)
+    return FileResponse(path, media_type="image/jpeg", filename=f"{frame_id}.jpg")
+
+
+@router.post("/projects/{project_id}/reports", response_model=ReportBuildOut)
+def build_reports(project_id: str, payload: ReportBuildRequest, request: Request) -> ReportBuildOut:
+    return ReportBuildOut.model_validate(
+        _library(request).build_project_reports(
+            project_id, include_private_notes=payload.include_private_notes
+        )
+    )
+
+
+@router.get("/projects/{project_id}/reports", response_model=ReportFilesOut)
+def list_reports(project_id: str, request: Request) -> ReportFilesOut:
+    return ReportFilesOut.model_validate(_library(request).list_report_files(project_id))
+
+
+@router.get("/projects/{project_id}/reports/{name}")
+def get_report_file(project_id: str, name: str, request: Request) -> Response:
+    content, media_type = _library(request).read_report_file(project_id, name)
+    return Response(content=content, media_type=media_type)
 
 
 @router.get("/projects/{project_id}/jobs", response_model=list[JobOut])

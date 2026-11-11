@@ -20,6 +20,7 @@ import NotesPanel, { type SaveStatus } from "../components/NotesPanel";
 import Player, { type PlayerController } from "../components/Player";
 import SamplingPanel from "../components/SamplingPanel";
 import VisionPanel from "../components/VisionPanel";
+import ContextProfileSelector from "../components/ContextProfileSelector";
 import StarRating from "../components/StarRating";
 import { formatBytes } from "../lib/format";
 
@@ -541,6 +542,19 @@ export default function LibraryTab({ online, session }: Props) {
           <span className="badge">{total} clip</span>
         </div>
 
+        {project ? (
+          <ContextProfileSelector
+            project={project}
+            online={online}
+            onChanged={(updated) => {
+              setProject(updated);
+              setProjects((items) =>
+                items.map((item) => (item.project_id === updated.project_id ? updated : item))
+              );
+            }}
+          />
+        ) : null}
+
         <select
           className="project-select"
           value={project?.project_id ?? ""}
@@ -752,6 +766,7 @@ export default function LibraryTab({ online, session }: Props) {
             />
             <VisionPanel
               asset={activeAsset}
+              projectId={project?.project_id ?? ""}
               online={online}
               onCompleted={(assetId) => {
                 void (async () => {

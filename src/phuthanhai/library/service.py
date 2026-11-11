@@ -16,7 +16,17 @@ from typing import Any
 
 from phuthanhai.analyzer.sampling import PROFILE_GAPS_MS
 from phuthanhai.analyzer.sampling_pipeline import SamplingError, SamplingPipeline
-from phuthanhai.analyzer.vision_service import VisionError, VisionService
+from phuthanhai.analyzer.vision_service import VisionError, VisionService, model_identity, runtime_versions
+from phuthanhai.analyzer.context_fusion import build_overlay
+from phuthanhai.analyzer.vlm_worker import PROMPT_VERSION, REQUEST_VERSION, VISUAL_PROMPT
+from phuthanhai.runtime.resource import GOVERNOR
+from phuthanhai.runtime.scheduler import HEAVY_SLOT
+from phuthanhai.utils.fs import atomic_write_json
+from phuthanhai.utils.hashes import sha256_file
+import hashlib, json, uuid
+from phuthanhai.analyzer import context_profiles
+from phuthanhai.analyzer.context_fusion import build_overlay
+from phuthanhai.analyzer import report as report_builder
 from phuthanhai.config import Settings
 from phuthanhai.library import notes as note_rules
 from phuthanhai.library import store
@@ -448,6 +458,304 @@ class LibraryService:
                 ],
             },
         }
+
+    # -- S04 project profile / context ------------------------------------ #
+    def set_project_profile(self, project_id: str, profile: str, expected_revision: int) -> dict[str, Any]:
+        if profile not in context_profiles.PROFILE_IDS:
+            raise store.StoreError("PROFILE_INVALID", f"unknown profile: {profile}", status=422)
+        with self.db.write() as conn:
+            project = store.set_project_profile(conn, project_id, profile, int(expected_revision))
+            project["asset_count"] = store.count_assets(conn, project_id)
+            return project
+
+    def _labels(self, project_id: str, asset_id: str) -> list[dict[str, Any]]:
+        with self.db.read() as conn:
+            return store.get_context_labels(conn, project_id, asset_id)
+
+    def context_overlay(self, asset_id: str) -> dict[str, Any]:
+        asset = self.get_asset(asset_id)
+        if asset.get("analysis_status") not in {"complete", "partial"}:
+            raise store.StoreError("EVIDENCE_REQUIRED", "run visual analysis before context fusion", status=409)
+        evidence = self.vision.load_evidence(asset_id)
+        if evidence is None:
+            raise store.StoreError("EVIDENCE_REQUIRED", "visual evidence is missing", status=409)
+        project = self.get_project(asset["project_id"])
+        overlay = build_overlay(
+            asset_id=asset_id,
+            asset_duration_ms=int(asset.get("duration_ms") or 1),
+            evidence=evidence,
+            profile_id=project.get("analysis_profile", context_profiles.DEFAULT_PROFILE),
+            user_labels=self._labels(asset["project_id"], asset_id),
+        )
+        overlay["project_id"] = asset["project_id"]
+        overlay["profile_revision"] = project.get("profile_revision")
+        return overlay
+
+    def confirm_label(
+        self,
+        asset_id: str,
+        *,
+        label_key: str,
+        label_vi: str | None,
+        status: str,
+        scene_id: str | None = None,
+        frame_id: str | None = None,
+    ) -> dict[str, Any]:
+        if status not in {"confirmed", "corrected", "dismissed"}:
+            raise store.StoreError("LABEL_STATUS_INVALID", "status must be confirmed, corrected or dismissed", status=422)
+        asset = self.get_asset(asset_id)
+        evidence = self.vision.load_evidence(asset_id)
+        if evidence is None:
+            raise store.StoreError("EVIDENCE_REQUIRED", "visual evidence is missing", status=409)
+        frames = {frame["frame_id"]: frame for frame in evidence["frames"]}
+        if frame_id is not None and frame_id not in frames:
+            raise store.StoreError("LABEL_FRAME_UNKNOWN", "frame does not belong to this evidence", status=422)
+        if scene_id is not None and not any(frame["scene_id"] == scene_id for frame in frames.values()):
+            raise store.StoreError("LABEL_SCENE_UNKNOWN", "scene does not belong to this evidence", status=422)
+        resolved_vi = (label_vi or "").strip()
+        if not resolved_vi:
+            profile_id = self.get_project(asset["project_id"]).get(
+                "analysis_profile", context_profiles.DEFAULT_PROFILE
+            )
+            spec = context_profiles.label(profile_id, label_key)
+            resolved_vi = spec.label_vi if spec else label_key
+        if status != "dismissed" and not resolved_vi:
+            raise store.StoreError("LABEL_TEXT_REQUIRED", "label text is required", status=422)
+        if len(resolved_vi) > 200:
+            raise store.StoreError("LABEL_TEXT_TOO_LONG", "label exceeds 200 characters", status=422)
+        with self.db.write() as conn:
+            store.upsert_context_label(
+                conn,
+                asset["project_id"],
+                asset_id,
+                label_key=label_key,
+                label_vi=resolved_vi,
+                status=status,
+                scene_id=scene_id,
+                frame_id=frame_id,
+            )
+        return self.context_overlay(asset_id)
+
+    def build_project_reports(self, project_id: str, *, include_private_notes: bool = False) -> dict[str, Any]:
+        started = time.monotonic()
+        project = self.get_project(project_id)
+        assets = self.list_assets(project_id, limit=50_000)["items"]
+        with self.db.read() as conn:
+            all_annotations = store.list_export_annotations(conn, project_id)
+        annotations = [
+            note
+            for note in all_annotations
+            if include_private_notes or note.get("note_type") == "context_label"
+        ]
+        evidence_by_asset: dict[str, dict[str, Any]] = {}
+        manifests: dict[str, dict[str, Any]] = {}
+        overlays: dict[str, dict[str, Any]] = {}
+        for asset in assets:
+            if asset.get("analysis_status") not in {"complete", "partial"}:
+                continue
+            evidence = self.vision.load_evidence(asset["asset_id"])
+            if evidence is None:
+                continue
+            evidence_by_asset[asset["asset_id"]] = evidence
+            if asset.get("sampling_fingerprint"):
+                manifest = self.pipeline.load_manifest(asset["asset_id"], asset["sampling_fingerprint"])
+                if manifest is not None:
+                    manifests[asset["asset_id"]] = manifest
+            overlays[asset["asset_id"]] = build_overlay(
+                asset_id=asset["asset_id"],
+                asset_duration_ms=int(asset.get("duration_ms") or 1),
+                evidence=evidence,
+                profile_id=project.get("analysis_profile", context_profiles.DEFAULT_PROFILE),
+                user_labels=self._labels(project_id, asset["asset_id"]),
+            )
+        documents = report_builder.assemble_documents(
+            project=project,
+            assets=assets,
+            annotations=annotations,
+            evidence_by_asset=evidence_by_asset,
+            overlays=overlays,
+            manifests=manifests,
+        )
+        report_builder.validate_documents(documents, self.settings.contracts_dir)
+        out_dir = self.settings.data.reports / project_id
+        written = report_builder.write_reports(
+            documents=documents,
+            assets=assets,
+            overlays=overlays,
+            evidence_by_asset=evidence_by_asset,
+            out_dir=out_dir,
+        )
+        return {
+            "project_id": project_id,
+            "profile": project.get("analysis_profile"),
+            "analysed_assets": len(documents["analyses"]),
+            "candidate_labels": sum(len(overlay.get("candidates", [])) for overlay in overlays.values()),
+            "user_labels": sum(len(overlay.get("user_labels", [])) for overlay in overlays.values()),
+            "files": written["files"],
+            "dir": written["dir"],
+            "elapsed_s": round(time.monotonic() - started, 3),
+            "validated": True,
+        }
+
+    def targeted_context_review(
+        self, asset_id: str, profile_id: str, frame_ids: list[str]
+    ) -> dict[str, Any]:
+        """Level 2: optional profile-aware re-look, separate from raw evidence."""
+
+        if profile_id not in context_profiles.PROFILE_IDS:
+            raise store.StoreError("PROFILE_INVALID", "unknown profile", status=422)
+        if not frame_ids or len(frame_ids) > 3:
+            raise store.StoreError("REVIEW_FRAME_COUNT", "select 1–3 frames", status=422)
+        asset = self.get_asset(asset_id)
+        evidence = self.vision.load_evidence(asset_id)
+        if evidence is None:
+            raise store.StoreError("EVIDENCE_REQUIRED", "visual evidence is missing", status=409)
+        by_id = {frame["frame_id"]: frame for frame in evidence["frames"]}
+        manifest = (
+            self.pipeline.load_manifest(asset_id, asset["sampling_fingerprint"])
+            if asset.get("sampling_fingerprint")
+            else None
+        )
+        manifest_frames = {frame["frame_id"]: frame for frame in (manifest or {}).get("frames", [])}
+        selected = [manifest_frames[fid] for fid in frame_ids if fid in manifest_frames and fid in by_id]
+        if len(selected) != len(frame_ids):
+            raise store.StoreError("REVIEW_FRAME_UNKNOWN", "frame not in evidence", status=422)
+        model = model_identity(self.vision.model_path)
+        runtime = runtime_versions(self.vision.runtime_python)
+        digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "frames": [[f["frame_id"], f["sha256"]] for f in selected],
+                    "profile": profile_id,
+                    "prompt": PROMPT_VERSION,
+                    "model": model,
+                    "runtime": runtime,
+                    "review_version": "s04-review-1",
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        cache_dir = self.settings.data.inference / asset_id / f"review-{digest[:20]}"
+        cached = cache_dir / "context_review.json"
+        if cached.is_file():
+            data = json.loads(cached.read_text(encoding="utf-8"))
+            data["cached"] = True
+            return data
+
+        allowed, reason = GOVERNOR.can_start_heavy_worker()
+        if not allowed:
+            raise store.StoreError(reason, "resource governor refused a heavy worker", status=409)
+        prompt = (
+            VISUAL_PROMPT
+            + f"\nContext preset: {profile_id}. If you see a table, decide whether it is a "
+            "ritual ancestor altar, a wedding decoration table, or a banquet table. "
+            "Do not claim identities, relationships, speech or clock time."
+        )
+        request = {
+            "request_version": REQUEST_VERSION,
+            "job_id": f"review-{uuid.uuid4()}",
+            "asset_id": asset_id,
+            "analysis_id": evidence["analysis_id"],
+            "model_path": str(self.vision.model_path),
+            "allowed_image_root": str(self.settings.data.sampling),
+            "prompt": prompt,
+            "prompt_version": PROMPT_VERSION + "+context",
+            "method": "sequential_frames",
+            "frames": [
+                {
+                    "frame_id": frame["frame_id"],
+                    "scene_id": frame["scene_id"],
+                    "image_path": frame["path"],
+                    "normalized_pts_ms": int(frame["normalized_pts_ms"]),
+                    "sha256": frame["sha256"],
+                }
+                for frame in selected
+            ],
+            "max_tokens": 320,
+            "temperature": 0.0,
+            "seed": 0,
+        }
+        try:
+            HEAVY_SLOT.acquire(asset_id, timeout=600)
+            try:
+                final = self.vision._run_worker(request, cancel=None)
+            finally:
+                HEAVY_SLOT.release(asset_id)
+        except VisionError as exc:
+            raise store.StoreError(exc.code, str(exc), status=502) from exc
+        reviewed = []
+        for entry in final.get("frames", []):
+            frame = by_id[entry["frame_id"]]
+            synthetic = {
+                "analysis_id": evidence["analysis_id"],
+                "coverage_status": evidence["coverage_status"],
+                "frames": [
+                    {
+                        "frame_id": frame["frame_id"],
+                        "scene_id": frame["scene_id"],
+                        "normalized_pts_ms": frame["normalized_pts_ms"],
+                        "interpretation_level": "observed",
+                        "observation": entry["observation"],
+                    }
+                ],
+            }
+            overlay = build_overlay(
+                asset_id=asset_id,
+                asset_duration_ms=int(asset["duration_ms"]),
+                evidence=synthetic,
+                profile_id=profile_id,
+                user_labels=[],
+            )
+            reviewed.append(
+                {
+                    "frame_id": frame["frame_id"],
+                    "scene_id": frame["scene_id"],
+                    "normalized_pts_ms": frame["normalized_pts_ms"],
+                    "observation": entry["observation"],
+                    "candidates": overlay["candidates"],
+                    "source": "context_review",
+                }
+            )
+        payload = {
+            "kind": "phuthanhai.context_review",
+            "schema_version": "1.0.0",
+            "review_id": str(uuid.uuid4()),
+            "asset_id": asset_id,
+            "profile": profile_id,
+            "prompt_version": PROMPT_VERSION + "+context",
+            "model_identity": model,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "cached": False,
+            "frames": reviewed,
+            "note_vi": "Đây là gợi ý xác minh chuyên sâu, không tự động xác nhận nhãn.",
+        }
+        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write_json(cached, payload)
+        return payload
+
+    def list_report_files(self, project_id: str) -> dict[str, Any]:
+        self.get_project(project_id)
+        directory = self.settings.data.reports / project_id
+        files = sorted(item.name for item in directory.iterdir() if item.is_file()) if directory.is_dir() else []
+        return {"project_id": project_id, "files": files}
+
+    def read_report_file(self, project_id: str, name: str) -> tuple[bytes, str]:
+        self.get_project(project_id)
+        allowed = {
+            "video_report_ai.md": "text/markdown; charset=utf-8",
+            "project_report_ai.md": "text/markdown; charset=utf-8",
+            "video_report_portable.md": "text/markdown; charset=utf-8",
+            "workspace_report_portable.md": "text/markdown; charset=utf-8",
+            "project_bundle.json": "application/json",
+            "workspace_extension.json": "application/json",
+            "workspace_package.json": "application/json",
+        }
+        if name not in allowed:
+            raise store.StoreError("REPORT_NOT_FOUND", "unknown report file", status=404)
+        path = self.settings.data.reports / project_id / name
+        if not path.is_file():
+            raise store.StoreError("REPORT_NOT_FOUND", "report has not been built", status=404)
+        return path.read_bytes(), allowed[name]
 
     # -- visual analysis --------------------------------------------------- #
     def start_analysis(self, asset_id: str, method: str = "auto") -> dict[str, Any]:

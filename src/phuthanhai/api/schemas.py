@@ -36,6 +36,8 @@ class ProjectOut(BaseModel):
     revision: int
     asset_count: int | None = None
     created: bool | None = None
+    analysis_profile: str = "general"
+    profile_revision: int = 1
 
 
 class ScanRequest(BaseModel):
@@ -279,3 +281,78 @@ class AnalysisSummary(BaseModel):
     frames_unknown: int
     warnings: list[str]
     evidence: dict[str, Any] | None = None
+
+
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: Literal[
+        "general",
+        "wedding_traditional",
+        "event",
+        "vlog_travel",
+        "documentary",
+        "pov_footage",
+        "custom",
+    ]
+    expected_revision: int
+
+
+class ProfileOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    project_id: str
+    analysis_profile: str
+    profile_revision: int
+
+
+class ContextLabelCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label_key: str = Field(min_length=1, max_length=80)
+    label_vi: str | None = Field(default=None, max_length=200)
+    status: Literal["confirmed", "corrected", "dismissed"]
+    scene_id: str | None = None
+    frame_id: str | None = None
+
+
+class ReportBuildOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    project_id: str
+    profile: str | None
+    analysed_assets: int
+    candidate_labels: int
+    user_labels: int
+    files: list[str]
+    dir: str
+    elapsed_s: float
+    validated: bool
+
+
+class ReportFilesOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    project_id: str
+    files: list[str]
+
+
+class ReportBuildRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    include_private_notes: bool = False
+
+
+class ContextReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: Literal[
+        "general",
+        "wedding_traditional",
+        "event",
+        "vlog_travel",
+        "documentary",
+        "pov_footage",
+        "custom",
+    ]
+    frame_ids: list[str]

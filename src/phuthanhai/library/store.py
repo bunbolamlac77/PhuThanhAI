@@ -76,6 +76,95 @@ def find_project_by_root(conn: sqlite3.Connection, root_path: str) -> dict[str, 
     return _project_row(row) if row else None
 
 
+def set_project_profile(
+    conn: sqlite3.Connection, project_id: str, profile: str, expected_revision: int
+) -> dict[str, Any]:
+    """Compare-and-set the project's environment profile (409 on conflict)."""
+
+    cursor = conn.execute(
+        "UPDATE projects SET analysis_profile = ?, profile_revision = profile_revision + 1, "
+        "updated_at = ? WHERE project_id = ? AND profile_revision = ?",
+        (profile, utc_now_iso(), project_id, expected_revision),
+    )
+    if cursor.rowcount != 1:
+        project = get_project(conn, project_id)
+        raise StoreError(
+            "PROFILE_REVISION_CONFLICT",
+            f"profile changed concurrently (current revision {project['profile_revision']})",
+            status=409,
+        )
+    return get_project(conn, project_id)
+
+
+def get_context_labels(
+    conn: sqlite3.Connection, project_id: str, asset_id: str | None = None
+) -> list[dict[str, Any]]:
+    if asset_id:
+        rows = conn.execute(
+            "SELECT * FROM annotations WHERE project_id = ? AND asset_id = ? AND note_type = 'context_label' "
+            "ORDER BY updated_at",
+            (project_id, asset_id),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM annotations WHERE project_id = ? AND note_type = 'context_label' ORDER BY updated_at",
+            (project_id,),
+        ).fetchall()
+    return [_annotation_row(row) for row in rows]
+
+
+def list_export_annotations(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
+    """All annotations including context labels, for portable export only."""
+
+    rows = conn.execute(
+        "SELECT * FROM annotations WHERE project_id = ? ORDER BY created_at", (project_id,)
+    ).fetchall()
+    return [_annotation_row(row) for row in rows]
+
+
+def upsert_context_label(
+    conn: sqlite3.Connection,
+    project_id: str,
+    asset_id: str,
+    *,
+    label_key: str,
+    label_vi: str,
+    status: str,
+    scene_id: str | None,
+    frame_id: str | None,
+) -> dict[str, Any]:
+    import uuid
+
+    now = utc_now_iso()
+    query = (
+        "SELECT * FROM annotations WHERE project_id = ? AND asset_id = ? AND note_type = 'context_label' "
+        "AND label_key = ? AND label_scene_id IS ?"
+    )
+    existing = conn.execute(query, (project_id, asset_id, label_key, scene_id)).fetchone()
+    assertion = "context_conflict" if status == "dismissed" else "confirmed_by_user"
+    text = (label_vi or label_key).strip()[:4000]
+    if existing is not None:
+        conn.execute(
+            "UPDATE annotations SET text = ?, assertion_status = ?, label_status = ?, label_frame_id = ?, "
+            "revision = revision + 1, updated_at = ? WHERE annotation_id = ?",
+            (text, assertion, status, frame_id, now, existing["annotation_id"]),
+        )
+        return get_annotation(conn, existing["annotation_id"])
+    annotation_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO annotations(annotation_id, project_id, asset_id, scope, start_ms, end_ms, text, "
+        "note_type, source, assertion_status, wall_time_of_day, wall_date, wall_timezone, wall_precision, "
+        "revision, created_at, updated_at, label_key, label_status, label_scene_id, label_frame_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            annotation_id, project_id, asset_id, "clip" if not scene_id else "clip", None, None, text,
+            "context_label", "user_annotation", assertion, None, None, None, None,
+            1, now, now, label_key, status, scene_id, frame_id,
+        ),
+    )
+    return get_annotation(conn, annotation_id)
+
+
 def touch_project(conn: sqlite3.Connection, project_id: str) -> None:
     conn.execute(
         "UPDATE projects SET updated_at = ?, revision = revision + 1 WHERE project_id = ?",
@@ -93,6 +182,8 @@ def _project_row(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "revision": row["revision"],
+        "analysis_profile": row["analysis_profile"] if "analysis_profile" in row.keys() else "general",
+        "profile_revision": row["profile_revision"] if "profile_revision" in row.keys() else 1,
         "asset_count": row["asset_count"] if "asset_count" in row.keys() else None,
     }
 
@@ -440,6 +531,10 @@ def _annotation_row(row: sqlite3.Row) -> dict[str, Any]:
         "revision": row["revision"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "label_key": row["label_key"] if "label_key" in row.keys() else None,
+        "label_status": row["label_status"] if "label_status" in row.keys() else None,
+        "label_scene_id": row["label_scene_id"] if "label_scene_id" in row.keys() else None,
+        "label_frame_id": row["label_frame_id"] if "label_frame_id" in row.keys() else None,
     }
 
 
@@ -504,7 +599,8 @@ def list_annotations(
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM annotations WHERE project_id = ? ORDER BY updated_at DESC",
+            "SELECT * FROM annotations WHERE project_id = ? "
+            "AND note_type != 'context_label' ORDER BY updated_at DESC",
             (project_id,),
         ).fetchall()
     return [_annotation_row(row) for row in rows]

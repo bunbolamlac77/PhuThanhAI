@@ -57,6 +57,7 @@ class BaseVisionCase(unittest.TestCase):
             model_path=self.model,
             request_timeout_s=10,
             batch_size=8,
+            require_governor=False,
         )
         self.service.vision = self.vision
 
@@ -148,6 +149,7 @@ class FailurePathTests(BaseVisionCase):
             model_path=self.model,
             request_timeout_s=0.6,
             batch_size=8,
+            require_governor=False,
         )
         self.service.vision = vision
         started = time.monotonic()
@@ -253,6 +255,7 @@ class CancelAndResumeTests(BaseVisionCase):
             model_path=self.model,
             request_timeout_s=10,
             batch_size=1,
+            require_governor=False,
         )
         first = self.analyze_with(vision, "crash_after_first")
         self.assertIn(first.status, {"partial", "cancelled"})

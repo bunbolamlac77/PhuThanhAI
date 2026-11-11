@@ -201,6 +201,10 @@ class AppPaths:
         return self.caches / "inference"
 
     @property
+    def reports(self) -> Path:
+        return self.root / "reports"
+
+    @property
     def runtime(self) -> Path:
         return self.root / "runtime"
 
@@ -224,6 +228,7 @@ class AppPaths:
             self.caches,
             self.sampling,
             self.inference,
+            self.reports,
             self.thumbs,
             self.preview_proxies,
             self.sampling,
