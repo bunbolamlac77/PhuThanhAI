@@ -15,8 +15,10 @@ never in the source tree.
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -222,6 +224,14 @@ def _migration_v5(conn: sqlite3.Connection) -> None:
 MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4, _migration_v5)
 
 
+class MigrationError(RuntimeError):
+    """A schema migration failed and the pre-migration backup was restored."""
+
+    def __init__(self, message: str, *, backup: Path | None = None) -> None:
+        super().__init__(message)
+        self.backup = backup
+
+
 class Database:
     """Thread-local connections over one WAL database file."""
 
@@ -276,13 +286,56 @@ class Database:
                 conn.execute("COMMIT")
 
     def migrate(self) -> int:
-        with self.write() as conn:
-            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-            for index, migration in enumerate(MIGRATIONS[version:], start=version + 1):
-                migration(conn)
-                conn.execute(f"PRAGMA user_version = {int(index)}")
-                version = index
+        """Apply migrations with a backup and automatic restore on failure.
+
+        Existing databases are backed up with SQLite's online backup API before
+        the first pending migration. A failing migration closes the connection,
+        restores the backup (including WAL sidecars) and raises
+        :class:`MigrationError` so the caller never serves a half-migrated schema.
+        """
+
+        version = int(self.connection().execute("PRAGMA user_version").fetchone()[0])
+        if version >= SCHEMA_VERSION:
             return version
+        backup: Path | None = None
+        if version > 0 and self.path.is_file():
+            stamp = time.strftime("%Y%m%dT%H%M%S")
+            backup = self.path.parent / "backups" / f"{self.path.stem}.v{version}.{stamp}.sqlite3"
+            self.backup_to(backup)
+        try:
+            with self.write() as conn:
+                current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+                for index, migration in enumerate(MIGRATIONS[current:], start=current + 1):
+                    migration(conn)
+                    conn.execute(f"PRAGMA user_version = {int(index)}")
+                    current = index
+                return current
+        except BaseException as exc:
+            if backup is not None and backup.is_file():
+                self.close_current_thread()
+                for suffix in ("-wal", "-shm"):
+                    sidecar = self.path.with_name(self.path.name + suffix)
+                    sidecar.unlink(missing_ok=True)
+                # Restore through SQLite rather than copying bytes over a WAL file:
+                # this leaves a consistent, owned file without stale shm state.
+                failed_copy = self.path.with_name(self.path.name + ".failed-migration")
+                failed_copy.unlink(missing_ok=True)
+                self.path.replace(failed_copy) if self.path.exists() else None
+                source = sqlite3.connect(str(backup))
+                try:
+                    target = sqlite3.connect(str(self.path))
+                    try:
+                        source.backup(target)
+                        target.execute("PRAGMA journal_mode=DELETE")
+                    finally:
+                        target.close()
+                finally:
+                    source.close()
+                failed_copy.unlink(missing_ok=True)
+                raise MigrationError(
+                    f"migration failed and backup was restored: {exc}", backup=backup
+                ) from exc
+            raise
 
     def schema_version(self) -> int:
         return int(self.connection().execute("PRAGMA user_version").fetchone()[0])

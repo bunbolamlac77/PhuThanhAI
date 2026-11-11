@@ -134,3 +134,44 @@ class UserLabelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecognitionImprovementTests(unittest.TestCase):
+    def classify(self, description: str, objects: list[str] | None = None) -> set[str]:
+        ev = evidence([frame("F0001", "S0001", 100, description, objects or [])])
+        overlay = build_overlay(asset_id="a", asset_duration_ms=3000, evidence=ev, profile_id="wedding_traditional")
+        return {item["label_key"] for item in overlay["candidates"]}
+
+    def test_negation_blocks_altar_claim(self) -> None:
+        keys = self.classify("A table with flowers and decorations, no incense, not an altar, without offerings.")
+        self.assertNotIn("ancestor_altar", keys)
+
+    def test_altar_like_single_signal_stays_unresolved(self) -> None:
+        ev = evidence([frame("F0001", "S0001", 100, "An altar-like decoration with flowers and a centerpiece.", ["altar-like", "flowers"])])
+        overlay = build_overlay(asset_id="a", asset_duration_ms=3000, evidence=ev, profile_id="wedding_traditional")
+        self.assertNotIn("ancestor_altar", {c["label_key"] for c in overlay["candidates"]})
+        self.assertTrue(any(item["label_key"] == "ancestor_altar" for item in overlay["unresolved"]))
+
+    def test_vid022_like_description_recalls_altar(self) -> None:
+        keys = self.classify(
+            "A room with a shrine-like setup with statues, offerings and flowers behind a long table.",
+            ["shrine-like", "statue", "offerings", "flowers"],
+        )
+        self.assertIn("ancestor_altar", keys)
+
+    def test_vid013_like_description_recalls_prep_and_photo(self) -> None:
+        keys = self.classify(
+            "A person in a red outfit stands behind a table with fruits and flowers. "
+            "A person's hands hold a camera, photographing the woman.",
+            ["person", "red outfit", "fruit", "camera"],
+        )
+        self.assertIn("bride_groom_prep", keys)
+        self.assertIn("family_photos", keys)
+
+    def test_word_boundary_avoids_substring_false_positive(self) -> None:
+        keys = self.classify("Delegates at the entrance with a welcome board and flowers.", ["delegates", "entrance", "flowers"])
+        self.assertNotIn("wedding_gate", keys)
+
+    def test_vietnamese_negation_is_respected(self) -> None:
+        keys = self.classify("Bàn trang trí hoa, không có hương, không phải bàn thờ.", ["bàn", "hoa"])
+        self.assertNotIn("ancestor_altar", keys)

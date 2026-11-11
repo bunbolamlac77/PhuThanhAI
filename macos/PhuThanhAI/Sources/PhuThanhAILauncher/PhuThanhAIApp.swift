@@ -2,12 +2,11 @@ import SwiftUI
 
 @main
 struct PhuThanhAIApp: App {
-    @StateObject private var backend = BackendController()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
         WindowGroup("PhuThanhAI") {
             LauncherView()
-                .environmentObject(backend)
                 .frame(minWidth: 1100, minHeight: 720)
         }
         .windowResizability(.contentMinSize)

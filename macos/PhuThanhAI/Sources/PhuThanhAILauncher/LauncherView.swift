@@ -1,15 +1,16 @@
+import AppKit
 import SwiftUI
 import WebKit
 
-/// Thin WKWebView wrapper. It renders the locally served React bundle and never
-/// injects a capability token into a URL.
 struct WebView: NSViewRepresentable {
     let url: URL
+    let onFailure: (String) -> Void
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
         webView.load(URLRequest(url: url))
         return webView
@@ -20,10 +21,22 @@ struct WebView: NSViewRepresentable {
             webView.load(URLRequest(url: url))
         }
     }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFailure: onFailure) }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        let onFailure: (String) -> Void
+        init(onFailure: @escaping (String) -> Void) { self.onFailure = onFailure }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            onFailure(error.localizedDescription)
+        }
+    }
 }
 
 struct LauncherView: View {
-    @EnvironmentObject private var backend: BackendController
+    @StateObject private var backend = BackendController()
+    @State private var webFailure: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,7 +45,9 @@ struct LauncherView: View {
             content
         }
         .task {
-            await backend.bootstrap()
+            guard !CommandLine.arguments.contains("--self-test") else { return }
+            (NSApp.delegate as? AppDelegate)?.backend = backend
+            await backend.start()
         }
     }
 
@@ -45,10 +60,12 @@ struct LauncherView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             statusBadge
-            Button("Kiểm tra lại") {
-                Task { await backend.bootstrap() }
+            if case .ready(let url) = backend.status {
+                Button("Mở bằng trình duyệt") { NSWorkspace.shared.open(url) }
+                    .controlSize(.small)
             }
-            .controlSize(.small)
+            Button("Kiểm tra lại") { Task { await backend.start() } }
+                .controlSize(.small)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -59,8 +76,8 @@ struct LauncherView: View {
         switch backend.status {
         case .idle:
             Text("Chưa kết nối").font(.system(size: 11)).foregroundStyle(.secondary)
-        case .checking(let target):
-            Text("Đang kiểm tra \(target)").font(.system(size: 11)).foregroundStyle(.secondary)
+        case .starting(let message):
+            Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
         case .ready:
             Text("Local · loopback")
                 .font(.system(size: 11))
@@ -68,10 +85,7 @@ struct LauncherView: View {
                 .padding(.vertical, 2)
                 .background(Color.green.opacity(0.18), in: Capsule())
         case .failed(let message):
-            Text(message)
-                .font(.system(size: 11))
-                .foregroundStyle(.red)
-                .lineLimit(2)
+            Text(message).font(.system(size: 11)).foregroundStyle(.red).lineLimit(3)
         }
     }
 
@@ -79,22 +93,31 @@ struct LauncherView: View {
     private var content: some View {
         switch backend.status {
         case .ready(let url):
-            WebView(url: url)
-        case .checking:
-            ProgressView("Đang chờ backend…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            WebView(url: url, onFailure: { message in
+                webFailure = message
+                if let target = URL(string: "http://127.0.0.1:\(url.port ?? 49321)/") {
+                    NSWorkspace.shared.open(target)
+                }
+            })
+            .overlay(alignment: .bottom) {
+                if let webFailure {
+                    Text("WKWebView lỗi: \(webFailure) — đã mở trình duyệt dự phòng.")
+                        .font(.system(size: 11))
+                        .padding(6)
+                        .background(Color.orange.opacity(0.85))
+                        .foregroundStyle(.black)
+                }
+            }
+        case .starting:
+            ProgressView("Đang khởi động backend…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case .idle, .failed:
             VStack(spacing: 10) {
                 Text("Backend chưa sẵn sàng")
                     .font(.system(size: 14, weight: .medium))
-                Text("Chạy backend rồi mở lại, hoặc đặt biến môi trường PHUTHANHAI_URL.")
+                Text("Kiểm tra log tại ~/Library/Application Support/PhuThanhAI/logs/backend.log")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Text("uv run phuthanhai serve --host 127.0.0.1")
-                    .font(.system(size: 12, design: .monospaced))
-                    .textSelection(.enabled)
-                Text("S00: launcher là scaffold. Đóng gói .app, icon và Spotlight thuộc S05.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                Button("Thử lại") { Task { await backend.start() } }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()

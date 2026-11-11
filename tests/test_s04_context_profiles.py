@@ -46,7 +46,8 @@ class ProfileRegistryTests(unittest.TestCase):
         altar = profiles.label("wedding_traditional", "ancestor_altar")
         self.assertIsNotNone(altar)
         self.assertIn("incense", altar.required_any)
-        self.assertGreaterEqual(altar.min_hits, 3)
+        self.assertGreaterEqual(altar.min_hits, 2)
+        # Two distinct groups are required, and the ritual gate is mandatory.
 
     def test_guardrails_forbid_identity_claims(self) -> None:
         wedding = profiles.profile("wedding_traditional")

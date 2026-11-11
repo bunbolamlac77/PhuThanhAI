@@ -9,6 +9,9 @@ and never claims the thresholds are safe.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import re
 import shutil
 import subprocess
@@ -225,17 +228,38 @@ def snapshot(path: Path | None = None) -> ResourceSnapshot:
 class ResourceGovernor:
     """Read-only view over measured resources; a single instance is shared."""
 
+    def __init__(self) -> None:
+        self._last: tuple[float, int] | None = None
+        self._lock = threading.Lock()
+        self.last_swap_rate_bytes_per_min = 0.0
+
     def snapshot(self) -> dict[str, Any]:
         return snapshot().to_dict()
 
+    def _swap_rate(self, current: Any, now: float) -> float:
+        swap = int(current.swap_used_bytes or 0)
+        rate = 0.0
+        with self._lock:
+            if self._last is not None:
+                elapsed = max(1.0, now - self._last[0])
+                rate = max(0.0, (swap - self._last[1]) / elapsed * 60.0)
+                self.last_swap_rate_bytes_per_min = rate
+            self._last = (now, swap)
+        return rate
+
     def can_start_heavy_worker(self, *, min_free_disk_bytes: int = THRESHOLDS.min_free_disk_bytes) -> tuple[bool, str]:
         current = snapshot()
+        rate = self._swap_rate(current, time.monotonic())
         if current.disk_free_bytes < min_free_disk_bytes:
             return False, "STORAGE_FULL"
         if current.level == "critical":
             return False, "MEMORY_CRITICAL"
         if current.available_bytes is not None and current.available_bytes < 1536 * 1024**2:
             return False, "MEMORY_CRITICAL"
+        # Rising swap is an early warning even when a single used/total ratio looks
+        # acceptable: a heavy job that adds >512 MiB/min is deferred.
+        if rate > 512 * 1024**2 and current.level != "normal":
+            return False, "MEMORY_PRESSURE_RISING"
         if current.level == "pressured":
             return True, "MEMORY_PRESSURED"
         return True, "OK"

@@ -28,3 +28,6 @@ macos/PhuThanhAI/.build-direct/
 # QA evidence stays local: it records /Users/... paths and private footage
 # descriptions. Regenerate with: python3 tools/run_s00_gate.py
 artifacts/qa/
+
+# built app bundle (contains machine-specific backend_root.txt)
+dist/

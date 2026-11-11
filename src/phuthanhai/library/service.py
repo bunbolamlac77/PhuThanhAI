@@ -480,12 +480,18 @@ class LibraryService:
         if evidence is None:
             raise store.StoreError("EVIDENCE_REQUIRED", "visual evidence is missing", status=409)
         project = self.get_project(asset["project_id"])
+        manifest = (
+            self.pipeline.load_manifest(asset_id, asset["sampling_fingerprint"])
+            if asset.get("sampling_fingerprint")
+            else None
+        )
         overlay = build_overlay(
             asset_id=asset_id,
             asset_duration_ms=int(asset.get("duration_ms") or 1),
             evidence=evidence,
             profile_id=project.get("analysis_profile", context_profiles.DEFAULT_PROFILE),
             user_labels=self._labels(asset["project_id"], asset_id),
+            scene_windows=(manifest or {}).get("segments"),
         )
         overlay["project_id"] = asset["project_id"]
         overlay["profile_revision"] = project.get("profile_revision")
@@ -567,6 +573,7 @@ class LibraryService:
                 evidence=evidence,
                 profile_id=project.get("analysis_profile", context_profiles.DEFAULT_PROFILE),
                 user_labels=self._labels(project_id, asset["asset_id"]),
+                scene_windows=(manifests.get(asset["asset_id"]) or {}).get("segments"),
             )
         documents = report_builder.assemble_documents(
             project=project,
@@ -705,6 +712,11 @@ class LibraryService:
                 evidence=synthetic,
                 profile_id=profile_id,
                 user_labels=[],
+                scene_windows=[
+                    {"scene_id": frame["scene_id"],
+                     "start_ms": next((seg["start_ms"] for seg in manifest.get("segments", []) if seg["scene_id"] == frame["scene_id"]), 0),
+                     "end_ms": next((seg["end_ms"] for seg in manifest.get("segments", []) if seg["scene_id"] == frame["scene_id"]), int(asset["duration_ms"]))}
+                ] if manifest else None,
             )
             reviewed.append(
                 {

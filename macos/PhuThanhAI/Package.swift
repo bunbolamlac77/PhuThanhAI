@@ -5,8 +5,9 @@
 // a WKWebView after verifying the loopback health endpoint. It contains no AI,
 // media, FFmpeg or database logic - those live in the Python backend.
 //
-// Not yet implemented (S05): .app bundling, .icns icon, Info.plist, code signing,
-// Spotlight registration, and supervised backend process spawn/termination.
+// S05 is packaged with tools/build_macos_app.py (swiftc + SDK), because SwiftPM
+// itself is broken on this machine. The .app bundles the compiled launcher, an
+// .icns icon, Info.plist, ad-hoc signature and backend supervision.
 import PackageDescription
 
 let package = Package(

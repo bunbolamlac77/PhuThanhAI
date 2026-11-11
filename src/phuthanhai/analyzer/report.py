@@ -66,56 +66,112 @@ def _analysis(asset: dict[str, Any], manifest: dict[str, Any], evidence: dict[st
     grouped: dict[str, list[dict[str, Any]]] = {}
     for frame in observed:
         grouped.setdefault(frame["scene_id"], []).append(frame)
-    ordered = sorted(grouped.items(), key=lambda item: int(item[1][0]["normalized_pts_ms"]))
-    previous_end = 0
-    for index, (scene_id, frames) in enumerate(ordered):
-        start = previous_end
-        next_start = int(ordered[index + 1][1][0]["normalized_pts_ms"]) if index + 1 < len(ordered) else duration
-        end = min(duration, max(start + 1, next_start))
-        if end <= start:
-            end = min(duration, start + 1)
-        previous_end = end
-        observations = []
-        for frame in frames:
-            obs = frame["observation"]
-            time_ms = int(frame["normalized_pts_ms"])
-            time_ms = min(max(time_ms, start), max(start, end - 1))
-            observations.append(
+    segments = manifest.get("segments") or []
+    boundary_errors: list[str] = []
+    segments_valid = bool(segments)
+    if segments_valid:
+        expected_start = 0
+        for segment in segments:
+            try:
+                scene_id = segment["scene_id"]
+                start_ms = int(segment["start_ms"])
+                end_ms = int(segment["end_ms"])
+            except (KeyError, TypeError, ValueError):
+                boundary_errors.append(f"invalid segment: {segment!r}")
+                segments_valid = False
+                break
+            if start_ms != expected_start or not (start_ms < end_ms <= duration):
+                boundary_errors.append(f"{scene_id} span {start_ms}-{end_ms} does not tile the timeline")
+                segments_valid = False
+                break
+            expected_start = end_ms
+        if segments_valid and expected_start != duration:
+            boundary_errors.append("segments do not reach source duration")
+            segments_valid = False
+
+    if segments_valid:
+        matched_ids: set[str] = set()
+        for segment in segments:
+            scene_id = segment["scene_id"]
+            start_ms = int(segment["start_ms"])
+            end_ms = int(segment["end_ms"])
+            frames = [
+                frame
+                for frame in observed
+                if frame["scene_id"] == scene_id
+                and start_ms <= int(frame["normalized_pts_ms"]) < end_ms
+            ]
+            matched_ids.update(frame["frame_id"] for frame in frames)
+            observations = []
+            for frame in frames:
+                obs = frame["observation"]
+                observations.append(
+                    {
+                        "id": frame["frame_id"],
+                        "time_ms": int(frame["normalized_pts_ms"]),
+                        "description": obs["description"],
+                        "objects": list(obs.get("objects") or []),
+                        "actions": list(obs.get("actions") or []),
+                        "camera": obs.get("camera"),
+                        "lighting": obs.get("lighting"),
+                        "visible_text": list(obs.get("visible_text") or []),
+                        "uncertainty": list(obs.get("uncertainty") or []),
+                    }
+                )
+            descriptions = [item["description"] for item in observations]
+            scenes.append(
                 {
-                    "id": frame["frame_id"],
-                    "time_ms": time_ms,
-                    "description": obs["description"],
-                    "objects": list(obs.get("objects") or []),
-                    "actions": list(obs.get("actions") or []),
-                    "camera": obs.get("camera"),
-                    "lighting": obs.get("lighting"),
-                    "visible_text": list(obs.get("visible_text") or []),
-                    "uncertainty": list(obs.get("uncertainty") or []),
+                    "id": scene_id,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "coverage_status": "sampled" if observations else "missing_observation",
+                    "summary": (descriptions[0] if descriptions else "Không có mô tả.")[:600],
+                    "visual_facts": sorted({obj for item in observations for obj in item["objects"]})[:12],
+                    "uncertainties": sorted({u for item in observations for u in item["uncertainty"]})[:8],
+                    "observations": observations,
                 }
             )
-        descriptions = [item["description"] for item in observations]
-        summary = (descriptions[0] if descriptions else "Không có mô tả.")[:600]
-        facts = sorted({obj for item in observations for obj in item["objects"]})[:12]
-        uncertainties = sorted({item for obs in observations for item in obs["uncertainty"]})[:8]
-        scenes.append(
-            {
-                "id": scene_id,
-                "start_ms": start,
-                "end_ms": end,
-                "coverage_status": "sampled",
-                "summary": summary,
-                "visual_facts": facts,
-                "uncertainties": uncertainties,
-                "observations": observations,
-            }
-        )
-    # Scenes must tile the whole timeline exactly; the last one ends at duration.
-    if scenes:
-        scenes[-1]["end_ms"] = duration
-        scenes[-1]["observations"] = [
-            {**observation, "time_ms": min(observation["time_ms"], duration - 1)}
-            for observation in scenes[-1]["observations"]
-        ]
+        for frame in observed:
+            if frame["frame_id"] not in matched_ids:
+                boundary_errors.append(
+                    f"frame {frame['frame_id']} PTS {frame['normalized_pts_ms']} outside manifest scene windows"
+                )
+    else:
+        ordered = sorted(grouped.items(), key=lambda item: int(item[1][0]["normalized_pts_ms"]))
+        previous_end = 0
+        for index, (scene_id, frames) in enumerate(ordered):
+            start = previous_end
+            next_start = int(ordered[index + 1][1][0]["normalized_pts_ms"]) if index + 1 < len(ordered) else duration
+            end = min(duration, max(start + 1, next_start))
+            previous_end = end
+            observations = [
+                {
+                    "id": frame["frame_id"],
+                    "time_ms": min(max(int(frame["normalized_pts_ms"]), start), max(start, end - 1)),
+                    "description": frame["observation"]["description"],
+                    "objects": list(frame["observation"].get("objects") or []),
+                    "actions": list(frame["observation"].get("actions") or []),
+                    "camera": frame["observation"].get("camera"),
+                    "lighting": frame["observation"].get("lighting"),
+                    "visible_text": list(frame["observation"].get("visible_text") or []),
+                    "uncertainty": list(frame["observation"].get("uncertainty") or []),
+                }
+                for frame in frames
+            ]
+            scenes.append(
+                {
+                    "id": scene_id,
+                    "start_ms": start,
+                    "end_ms": end,
+                    "coverage_status": "sampled",
+                    "summary": (observations[0]["description"] if observations else "Không có mô tả.")[:600],
+                    "visual_facts": sorted({obj for item in observations for obj in item["objects"]})[:12],
+                    "uncertainties": sorted({u for item in observations for u in item["uncertainty"]})[:8],
+                    "observations": observations,
+                }
+            )
+        if scenes:
+            scenes[-1]["end_ms"] = duration
     if not scenes:
         return None
 
@@ -136,7 +192,13 @@ def _analysis(asset: dict[str, Any], manifest: dict[str, Any], evidence: dict[st
         "created_at": _now_iso(),
         "status": (
             "complete"
-            if evidence.get("coverage_status") == "sufficient" and observed_gap <= expected_gap
+            if (
+                segments_valid
+                and not boundary_errors
+                and evidence.get("coverage_status") == "sufficient"
+                and observed_gap <= expected_gap
+                and all(scene["coverage_status"] == "sampled" for scene in scenes)
+            )
             else "partial"
         ),
         "source": {
@@ -173,6 +235,8 @@ def _analysis(asset: dict[str, Any], manifest: dict[str, Any], evidence: dict[st
             set(evidence.get("warnings") or [])
             | {"sampled_frames_not_all_frames"}
             | ({"audio_not_transcribed"} if bool(source.get("has_audio") or asset.get("has_audio")) else set())
+            | (set() if segments_valid else {"scene_timecode_unverified"})
+            | ({"scene_boundary_error"} if boundary_errors else set())
         ),
     }
 

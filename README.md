@@ -2,7 +2,7 @@
 
 Local-first, offline video library / analyzer for macOS Apple Silicon.
 
-This repository is being built milestone by milestone. **Current state: S04 (context fusion, Vietnamese wedding presets, AI/portable reports).**
+This repository is being built milestone by milestone. **Current state: S05 (native .app, WKWebView, scene-timecode/migration P0 fixes, recognition improvements).**
 The POV tab stays locked until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
 
 ## Layout
@@ -39,7 +39,7 @@ src/phuthanhai/                 application package
     service.py                  composition layer used by API and tests
   pov/                          locked until G5 (no engine)
 web/                            React + TypeScript + Vite shell, four tabs, bundled offline
-macos/PhuThanhAI/               thin SwiftUI + WKWebView launcher scaffold (SwiftPM)
+macos/PhuThanhAI/               SwiftUI + WKWebView launcher sources (packaged by tools/build_macos_app.py)
 tests/                          unit + integration tests (stdlib unittest; pytest-compatible)
 tools/                          validate_specs.py (contract QA), run_s00_gate.py (evidence collector)
 artifacts/qa/S00/               gate evidence produced on this machine
@@ -68,6 +68,8 @@ PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s03_gate.py              # regenerate artifacts/qa/S03 evidence (real inference)
 PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s04_gate.py              # regenerate artifacts/qa/S04 evidence (context + reports)
+python3 tools/build_macos_app.py             # build/sign/register dist/PhuThanhAI.app
+python3 tools/run_s05_gate.py                # regenerate artifacts/qa/S05 evidence (G5)
 ```
 
 ## Environment separation (non-negotiable)
@@ -196,16 +198,56 @@ Evidence is local-only in `artifacts/qa/S02/`.
 | Scenario matrix | 18/18 (1–11 rule-level synthetic observations, 12–18 real/restart/contract/E2E) |
 | UI regression | player/notes/autosave/shortcuts PASS in Chrome |
 
-## Known limitations (S00–S04)
+## S05 result on this machine (2026-11-11)
 
-- **Context recognition is conservative, not production-accurate.** On the two reviewed wedding clips recall was 0.444: a clear altar was reported as `unresolved` rather than confirmed, and preparation/offering labels were missed. Precision 0.800 was measured on 2 clips, not a general promise.
-- **Only 2 real wedding clips + 2 non-wedding controls were reviewed.** Scenarios 4–10 (family altar outside a wedding, unrelated worship space, wedding gate, trays, preparation, modern hall) are covered by rule-level synthetic observations, not real footage. The 18/18 matrix is not a real-world accuracy claim.
-- **Human QA covered 2 frames** (owner-confirmed). No broad inter-annotator study exists.
-- **No confidence numbers**: candidates are rule-derived hypotheses; user confirmation is stored as an annotation and labelled `user_asserted`.
-- **Sustained multi-clip inference is memory-bound**: macOS swap reached 91.6% while 6.7 GiB RAM was free; the governor now classifies that as `pressured` (not critical), and the gate waits between clips. Thresholds remain provisional.
-- **Targeted review** reuses the same Qwen3-VL worker with a context prompt; it does not train or add a second model. It is cached per frame hash/profile/prompt/model, but its labels still require user confirmation.
-- **S03 raw evidence is immutable**; changing a profile or confirming a label only rebuilds overlay/report. The report layer rejects fabricated refs and never turns a candidate into `observed`.
-- **Migration v5** was exercised by creating data and reopening the library; an automated upgrade test against a captured S03 database file is still missing.
-- **Report audio stance**: image-only analysis never claims to have heard or transcribed audio; reports with an audio stream carry `audio_not_transcribed`.
-- **POV remains locked** until G0–G5; S05 (app/Spotlight/WKWebView) is not started.
-- `artifacts/qa/` and real-footage paths stay out of git; the repository contains source, tests, tools and docs only.
+`python3 tools/run_s05_gate.py` → **G5 NOT VERIFIED** (functional steps pass; mandatory
+three-genre review and endurance items are missing, listed in the gate).
+
+| Fact | Measured value |
+|---|---|
+| Tests | 314 passed, 0 failed, 1 skipped (optional real-footage scan when env unset) |
+| Scene timecode | 16/16 sampled frames inside S02 manifest scene windows; all 16 first frames sat 1–3 s after scene start and are now reported at the true boundary |
+| DB migration | real S03 (v4) SQLite built from the S03 source → v5: IDs/notes/rating/favorite/tags preserved; repeated migration is a no-op; simulated failure restores the pre-migration backup |
+| Recognition | before 0.800/0.444 → after 1.000/0.778 (precision/recall on the same 2 clips — not held out) |
+| Native app | `.app` built with `swiftc`+SDK, icon, Info.plist, ad-hoc signature; Finder/Spotlight launch, Dock foreground, one app + one backend (parent = app), clean quit reaps backend and frees the port |
+| WKWebView | real React shell + health 200; 8/8 videos `readyState 4`: H.264, HEVC 4K, ProRes fixture, rotation-corrected 240×320, VFR |
+| Portable/security | V2/V3 package roundtrip validates; private notes remain hidden in hidden export |
+| Screen | `artifacts/qa/S05/app_screen2.png` (real WKWebView window on the MacBook display) |
+
+### G5 NOT VERIFIED because
+
+- **Golden dataset:** only wedding footage + synthetic controls exist on this machine; no
+  reviewer-labeled daily vlog/travel or event/BTS set. Recognition was tuned and evaluated
+  on the same two clips, so the improved numbers are not a generalization estimate.
+- **Endurance:** the 1,000-asset suite passes, but 5,000 assets and sustained multi-clip
+  real-model batches were not run; 16 GB swap limits long runs.
+- **Real-model cancel / playback during inference:** cancel/reap is proven with the protocol
+  worker and app quit, not by cancelling a live Qwen3-VL generate while playing video.
+- **Accessibility:** no VoiceOver or reduced-motion pass on the native app.
+
+## Known limitations (S00–S05)
+
+- **G5 is NOT VERIFIED**, not failed: all functional/security/native checks pass, but the
+  mandatory three-genre reviewer dataset, 5,000-asset endurance, live-model cancel and
+  accessibility review are missing. Do not describe S05 as production-accepted.
+- **Recognition remains narrow:** the 1.000/0.778 numbers come from the same two wedding
+  clips used for tuning; altar recall improved, but reception on vid_022 is still missed
+  and there is no held-out genre evaluation.
+- **Native app is locally built and ad-hoc signed**, not notarized. It expects the project
+  venv and source tree via `backend_root.txt`; it is not a self-contained standalone bundle
+  and must be rebuilt with `tools/build_macos_app.py` after source changes.
+- **`swift build`/SwiftPM still fails** on this machine; the supported build path is
+  `tools/build_macos_app.py` (swiftc + `MacOSX26.sdk`). Upgrading macOS/Xcode was avoided
+  because AIVideo compatibility is not established.
+- **Browser fallback** is implemented (opens the loopback UI and shows the WKWebView error),
+  but its manual failure path was not exercised in an E2E test.
+- **5,000 assets / long real-model batches** are not verified; 1,000 assets are.
+- **Live Qwen3-VL cancel** during `generate()` and playback-during-inference are not verified;
+  process-level cancel/reap is verified with the fake protocol worker and app quit.
+- **Accessibility:** labels exist for key controls, but VoiceOver, focus-order and
+  reduced-motion passes were not performed.
+- **POV remains locked**; S06 (script engine/TTS) was not started.
+- **Skipped pytest:** `tests/test_scanner.py::RealFootageScanTests::test_scan_real_folder_read_only`
+  skips when `PHUTHANHAI_TEST_FOOTAGE` is unset; this is intentional and matches the gate logs.
+- `artifacts/qa/` (including app screenshots, footage labels and QA logs) and `dist/` are
+  git-ignored; published code contains no footage, secrets or private paths.

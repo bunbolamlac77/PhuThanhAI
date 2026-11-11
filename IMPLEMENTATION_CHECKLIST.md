@@ -211,3 +211,25 @@ NEXT STEP: ... (nếu PASS)
 - [x] 18-scenario matrix PASS (1–11 synthetic rule-level, 12–18 real/restart/contract/E2E), with coverage limits documented.
 
 **G4 limitations:** small real evaluation set (2 clips); scenarios 4–10 only rule-level; recall 0.444; no calibrated confidence; migration tested by reopen, not against a captured S03 DB; multi-clip inference is memory-bound.
+
+## S05 — Native App, Recognition, Reliability — Gate G5
+
+> **AI-run result on 2026-11-11** (`MacBookPro18,3`, macOS 26.7.1): **G5 NOT VERIFIED**.
+> 314 tests pass; P0 scene timecode/migration fixed; native `.app` and WKWebView tested on the
+> real machine. Missing: three-genre reviewer dataset, 5,000-asset endurance, live-model cancel,
+> accessibility QA. Evidence: `artifacts/qa/S05/{gate.md,gate.json,device_metrics.json,recognition.json,scene_audit.json,app_selftest.json,app_launch.json,app_screen2.png}`.
+
+- [x] P0 scene boundaries from S02 manifest; frames outside windows rejected; unverified manifest never reported complete.
+- [x] P0 real v4→v5 migration with backup and restore-on-failure; repeated migration idempotent.
+- [x] P1 recognition: negation/boundary-aware matching, synonym dedupe, altar/trays/prep/photo signals; before/after measured.
+- [x] P1 label dismissal scoped to scene/frame/clip; no cross-scene removal.
+- [x] Native `.app`: Finder/Spotlight launch, Dock foreground, icon, single app/backend, backend parented by app, clean quit reap.
+- [x] WKWebView real shell + H.264/HEVC/ProRes/rotation/VFR playback; browser fallback implemented.
+- [x] Security/portable regression; governor swap-rate monitoring.
+- [ ] Golden 3-genre dataset with reviewer labels (NOT VERIFIED).
+- [ ] 5,000-asset and sustained real-model endurance (NOT VERIFIED).
+- [ ] Live-model cancel during generate + UI playback during inference (NOT VERIFIED).
+- [ ] Accessibility/VoiceOver/reduced-motion pass (NOT VERIFIED).
+
+**G5 note:** functional, native and security checks pass; the gate stays NOT VERIFIED until the
+dataset, endurance, live-cancel and accessibility items above are executed.
