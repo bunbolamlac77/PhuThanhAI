@@ -56,6 +56,7 @@ from phuthanhai.utils.hashes import sha256_file
 
 VISION_VERSION = "s03-vision-1"
 MAX_WORKER_OUTPUT_BYTES = 32 * 1024 * 1024
+MAX_WORKER_LINE_BYTES = 4 * 1024 * 1024
 MAX_WORKER_STDERR_BYTES = 1024 * 1024
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_TIMEOUT_S = 900.0
@@ -76,6 +77,14 @@ for name in ("mlx", "mlx-vlm", "mlx-lm", "transformers"):
         out[name] = None
 print(json.dumps(out))
 """
+
+
+def _percentile(values: list[float], pct: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, round((pct / 100) * (len(ordered) - 1))))
+    return round(ordered[index], 3)
 
 
 class VisionError(RuntimeError):
@@ -104,6 +113,7 @@ class VisionOutcome:
     selection_mode: str = "full"
     frame_cache_hits: int = 0
     inferences: int = 0
+    frame_timings: list[dict[str, Any]] = field(default_factory=list)
     worker_loads: int = 0
     model_load_s: float = 0.0
     generation_tokens: int = 0
@@ -126,6 +136,12 @@ class VisionOutcome:
             "selection_mode": self.selection_mode,
             "frame_cache_hits": self.frame_cache_hits,
             "inferences": self.inferences,
+            "frame_timings": self.frame_timings,
+            "checkpoint_p50_ms": _percentile([t.get("checkpoint_write_ms", 0) for t in self.frame_timings], 50),
+            "checkpoint_p95_ms": _percentile([t.get("checkpoint_write_ms", 0) for t in self.frame_timings], 95),
+            "time_to_first_committed_frame_ms": (
+                self.frame_timings[0].get("committed_ms") if self.frame_timings else None
+            ),
             "worker_loads": self.worker_loads,
             "model_load_s": round(self.model_load_s, 3),
             "generation_tokens": self.generation_tokens,
@@ -333,11 +349,7 @@ class VisionService:
         cancel: threading.Event | None,
         on_frame: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """Consume worker JSONL incrementally; never buffer the whole run.
-
-        The reader thread only enqueues bytes. Validation and durable commits run
-        in the orchestration thread (no SQLite access from the reader thread).
-        """
+        """Stream bounded JSONL events; validate/commit only in this thread."""
         payload = json.dumps(request, ensure_ascii=False).encode("utf-8")
         if len(payload) > MAX_REQUEST_BYTES:
             raise VisionError("WORKER_REQUEST_TOO_LARGE", "request exceeds the worker size cap")
@@ -347,6 +359,7 @@ class VisionService:
         started = time.monotonic()
         popen = PROCESSES.spawn(argv, env=self._worker_env())
         lines: queue.Queue[tuple[str, bytes | None]] = queue.Queue(maxsize=1024)
+        stop_event = threading.Event()
         stderr_bytes = bytearray()
         stderr_lock = threading.Lock()
         timed_out = False
@@ -354,6 +367,15 @@ class VisionService:
         output_too_large = False
         expected = {frame["frame_id"]: frame for frame in request.get("frames", [])}
         seen: set[str] = set()
+
+        def enqueue(kind: str, raw: bytes | None) -> bool:
+            while not stop_event.is_set():
+                try:
+                    lines.put((kind, raw), timeout=0.2)
+                    return True
+                except queue.Full:
+                    continue
+            return False
 
         def drain_stderr() -> None:
             try:
@@ -370,28 +392,59 @@ class VisionService:
         def read_stdout() -> None:
             nonlocal output_too_large
             total = 0
+            buffer = bytearray()
             try:
                 assert popen.stdout is not None
-                for raw in popen.stdout:
-                    total += len(raw)
-                    if total > MAX_WORKER_OUTPUT_BYTES or len(raw) > MAX_WORKER_OUTPUT_BYTES:
+                while True:
+                    chunk = popen.stdout.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_WORKER_OUTPUT_BYTES:
                         output_too_large = True
-                        lines.put(("too_large", None))
+                        enqueue("too_large", None)
                         return
-                    lines.put(("line", raw))
+                    buffer.extend(chunk)
+                    while True:
+                        newline = buffer.find(b"\n")
+                        if newline < 0:
+                            break
+                        line = bytes(buffer[:newline])
+                        del buffer[: newline + 1]
+                        if len(line) > MAX_WORKER_LINE_BYTES:
+                            output_too_large = True
+                            enqueue("too_large", None)
+                            return
+                        if line.strip() and not enqueue("line", line):
+                            return
+                    if len(buffer) > MAX_WORKER_LINE_BYTES:
+                        output_too_large = True
+                        enqueue("too_large", None)
+                        return
+                if buffer:
+                    if len(buffer) > MAX_WORKER_LINE_BYTES:
+                        output_too_large = True
+                        enqueue("too_large", None)
+                        return
+                    if buffer.strip():
+                        enqueue("line", bytes(buffer))
             finally:
-                lines.put(("eof", None))
+                enqueue("eof", None)
+
+        def write_request() -> None:
+            try:
+                assert popen.stdin is not None
+                popen.stdin.write(payload)
+                popen.stdin.close()
+            except (BrokenPipeError, OSError, ValueError):
+                return
 
         err_thread = threading.Thread(target=drain_stderr, name="vlm-worker-stderr", daemon=True)
         out_thread = threading.Thread(target=read_stdout, name="vlm-worker-stdout", daemon=True)
+        write_thread = threading.Thread(target=write_request, name="vlm-worker-stdin", daemon=True)
         err_thread.start()
         out_thread.start()
-        try:
-            assert popen.stdin is not None
-            popen.stdin.write(payload)
-            popen.stdin.close()
-        except (BrokenPipeError, OSError):
-            pass
+        write_thread.start()
 
         last_seq = 0
         final: dict[str, Any] | None = None
@@ -400,10 +453,12 @@ class VisionService:
             while True:
                 if cancel is not None and cancel.is_set():
                     cancelled = True
+                    stop_event.set()
                     self._terminate(popen)
                     break
                 if time.monotonic() - started > self.request_timeout_s:
                     timed_out = True
+                    stop_event.set()
                     self._terminate(popen)
                     break
                 try:
@@ -414,45 +469,56 @@ class VisionService:
                     break
                 if kind == "too_large":
                     output_too_large = True
+                    stop_event.set()
                     self._terminate(popen)
                     break
                 assert raw is not None
                 try:
                     event = json.loads(raw.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    stop_event.set()
                     self._terminate(popen)
-                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker emitted invalid JSONL") from exc
+                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker emitted invalid/truncated JSONL") from exc
                 if not isinstance(event, dict):
+                    stop_event.set()
                     self._terminate(popen)
                     raise VisionError("WORKER_PROTOCOL_INVALID", "worker event must be an object")
                 seq = event.get("seq")
                 if not isinstance(seq, int) or seq <= last_seq:
+                    stop_event.set()
                     self._terminate(popen)
                     raise VisionError("WORKER_PROTOCOL_INVALID", "worker protocol sequence is not increasing")
                 last_seq = seq
                 event_type = event.get("type")
                 if event_type not in {"worker_ready", "model_loaded", "frame_result", "sequence_result", "result", "error"}:
+                    stop_event.set()
                     self._terminate(popen)
                     raise VisionError("WORKER_PROTOCOL_INVALID", f"unknown worker event: {event_type}")
                 if event.get("job_id") is not None and event.get("job_id") != request["job_id"]:
+                    stop_event.set()
                     self._terminate(popen)
                     raise VisionError("WORKER_PROTOCOL_INVALID", "worker job identity mismatch")
                 if event.get("asset_id") is not None and event.get("asset_id") != request["asset_id"]:
+                    stop_event.set()
                     self._terminate(popen)
                     raise VisionError("WORKER_PROTOCOL_INVALID", "worker asset identity mismatch")
                 if event_type == "frame_result":
                     frame_id = event.get("frame_id")
                     if frame_id not in expected:
+                        stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", f"frame not in request: {frame_id}")
                     verified = expected[frame_id]
                     if event.get("sha256") not in (None, verified.get("sha256")):
+                        stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", "frame hash mismatch")
                     if event.get("normalized_pts_ms") not in (None, int(verified["normalized_pts_ms"])):
+                        stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", "frame PTS mismatch")
                     if event.get("scene_id") not in (None, verified["scene_id"]):
+                        stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", "frame scene mismatch")
                     if on_frame is not None and frame_id not in seen:
@@ -463,14 +529,17 @@ class VisionService:
                 elif event_type == "result":
                     final = event
         finally:
+            stop_event.set()
             if popen.poll() is None:
                 self._terminate(popen)
             try:
                 popen.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._terminate(popen)
+            returncode = popen.returncode
             out_thread.join(timeout=5)
             err_thread.join(timeout=5)
+            write_thread.join(timeout=5)
             PROCESSES.discard(popen.pid)
 
         if cancelled:
@@ -484,17 +553,12 @@ class VisionService:
                 str(error_event.get("code", "MODEL_INFERENCE_FAILED")),
                 vlm_worker.redact(str(error_event.get("message", "")))[:500],
             )
+        if returncode == -signal.SIGKILL:
+            raise VisionError("WORKER_KILLED", "worker was killed (SIGKILL)")
+        if returncode != 0:
+            raise VisionError("WORKER_CRASHED", f"worker exited with status {returncode}")
         if final is None:
             raise VisionError("WORKER_CRASHED", "worker exited without a final result event")
-
-        # Legacy/one-shot workers may only send frames in the final result. Commit
-        # any validated frames that were not already streamed.
-        if on_frame is not None:
-            for entry in final.get("frames") or []:
-                frame_id = entry.get("frame_id")
-                if frame_id in expected and frame_id not in seen:
-                    on_frame({**entry, "type": "frame_result", "job_id": request["job_id"]})
-                    seen.add(frame_id)
 
         self._worker_loads = getattr(self, "_worker_loads", 0) + 1
         self._load_s_total = getattr(self, "_load_s_total", 0.0) + float(final.get("load_s") or 0.0)
@@ -521,6 +585,7 @@ class VisionService:
     ) -> VisionOutcome:
         started = time.monotonic()
         self._worker_loads = 0
+        self._worker_failure_seen = False
         self._load_s_total = 0.0
         asset_id = asset["asset_id"]
         retries = 0
@@ -621,11 +686,16 @@ class VisionService:
         checkpoint = self._load_checkpoint(checkpoint_path, fingerprint)
         analysis_id = checkpoint["analysis_id"] if checkpoint else str(uuid.uuid4())
         results: dict[str, dict[str, Any]] = dict(checkpoint["results"]) if checkpoint else {}
-        valid_results = {
-            frame_id: value
-            for frame_id, value in results.items()
-            if isinstance(value, dict) and isinstance(value.get("observation"), dict)
-        }
+        allowed_ids = {frame["frame_id"] for frame in frame_refs}
+        valid_results: dict[str, Any] = {}
+        for frame_id, value in results.items():
+            if frame_id not in allowed_ids or not isinstance(value, dict):
+                continue
+            try:
+                vlm_worker.validate_observation(value.get("observation"))
+            except vlm_worker.WorkerError:
+                continue
+            valid_results[frame_id] = value
         results = valid_results
         frame_cache = FrameResultCache(self.settings.data.inference / "frames")
         cache_keys: dict[str, str] = {}
@@ -669,20 +739,26 @@ class VisionService:
         total = len(frame_refs)
         committed = len(results)
         inferences = 0
+        frame_timings: list[dict[str, Any]] = []
 
         def commit_frame(event: dict[str, Any]) -> None:
             """Durably commit one validated worker frame before progress advances."""
             nonlocal inferences
+            received = time.monotonic()
             frame_id = event.get("frame_id")
             frame = next((item for item in frame_refs if item["frame_id"] == frame_id), None)
             if frame is None or frame_id in results:
                 return
+            validate_started = time.monotonic()
             try:
                 observation = vlm_worker.validate_observation(event.get("observation"))
             except vlm_worker.WorkerError:
                 # Invalid model output must remain unknown, never committed/cached.
                 return
+            validation_ms = (time.monotonic() - validate_started) * 1000
+            cache_started = time.monotonic()
             frame_cache.put(cache_keys[frame_id], observation, method=event.get("method", resolved_method))
+            cache_ms = (time.monotonic() - cache_started) * 1000
             inferences += 1
             results[frame_id] = {
                 "observation": observation,
@@ -692,11 +768,24 @@ class VisionService:
                 "prompt_tokens": event.get("prompt_tokens"),
                 "streamed": True,
             }
+            checkpoint_started = time.monotonic()
             self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
+            checkpoint_ms = (time.monotonic() - checkpoint_started) * 1000
+            committed_at = time.monotonic()
             emit(
                 "inferring", len(results), total,
                 current_scene=frame["scene_id"], worker_state="committed",
             )
+            frame_timings.append({
+                "frame_id": frame_id,
+                "received_ms": round((received - started) * 1000, 3),
+                "validation_ms": round(validation_ms, 3),
+                "frame_cache_write_ms": round(cache_ms, 3),
+                "checkpoint_write_ms": round(checkpoint_ms, 3),
+                "committed_ms": round((committed_at - started) * 1000, 3),
+                "committed_monotonic": committed_at,
+                "progress_emitted_ms": round((time.monotonic() - started) * 1000, 3),
+            })
         emit(
             "inferring",
             committed,
@@ -779,6 +868,10 @@ class VisionService:
 
         self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
         finished_status = "cancelled" if cancel is not None and cancel.is_set() else "complete"
+        failure_warning = None
+        if finished_status == "complete" and getattr(self, "_worker_failure_seen", False):
+            finished_status = "partial"
+            failure_warning = "worker failed during inference; only durably committed frames are evidence"
         return self._finalize(
             asset,
             analysis_id,
@@ -793,6 +886,7 @@ class VisionService:
             sampling_total,
             frame_cache_hits,
             inferences,
+            frame_timings,
             source_sha,
             model,
             runtime,
@@ -801,7 +895,11 @@ class VisionService:
             retries,
             restarts,
             status=finished_status,
-            warnings=["cancelled by operator; committed frames are reusable"] if finished_status == "cancelled" else None,
+            warnings=(
+                ["cancelled by operator; committed frames are reusable"]
+                if finished_status == "cancelled"
+                else ([failure_warning] if failure_warning else None)
+            ),
         )
 
     def _infer_with_retries(
@@ -827,6 +925,7 @@ class VisionService:
             try:
                 return self._infer_batch(asset, current, method, cancel, analysis_id, on_frame=on_frame)
             except VisionError as exc:
+                self._worker_failure_seen = True
                 if exc.code == "WORKER_CANCELLED":
                     return {}
                 retryable = exc.code in {
@@ -895,13 +994,23 @@ class VisionService:
         if final.get("analysis_id") != analysis_id:
             raise VisionError("WORKER_PROTOCOL_INVALID", "worker analysis_id mismatch")
         returned = final.get("frames") or []
-        expected = {frame["frame_id"] for frame in batch}
+        expected = {frame["frame_id"]: frame for frame in batch}
         seen: set[str] = set()
         results: dict[str, Any] = {}
+        validated_entries: list[dict[str, Any]] = []
         for entry in returned:
+            if not isinstance(entry, dict):
+                raise VisionError("WORKER_PROTOCOL_INVALID", "final frame entry must be an object")
             frame_id = entry.get("frame_id")
             if frame_id not in expected or frame_id in seen:
                 raise VisionError("WORKER_PROTOCOL_INVALID", f"unexpected/duplicate frame: {frame_id}")
+            verified = expected[frame_id]
+            if entry.get("scene_id") not in (None, verified["scene_id"]):
+                raise VisionError("WORKER_PROTOCOL_INVALID", "final frame scene mismatch")
+            if entry.get("normalized_pts_ms") not in (None, int(verified["normalized_pts_ms"])):
+                raise VisionError("WORKER_PROTOCOL_INVALID", "final frame PTS mismatch")
+            if entry.get("sha256") not in (None, verified.get("sha256")):
+                raise VisionError("WORKER_PROTOCOL_INVALID", "final frame hash mismatch")
             seen.add(frame_id)
             results[frame_id] = {
                 "observation": entry.get("observation"),
@@ -910,8 +1019,18 @@ class VisionService:
                 "generation_tokens": entry.get("generation_tokens"),
                 "prompt_tokens": entry.get("prompt_tokens"),
             }
-        if seen != expected:
+            validated_entries.append(entry)
+        if seen != set(expected):
             raise VisionError("WORKER_PROTOCOL_INVALID", "worker skipped frames")
+        # Commit legacy/final-only frames only after every result field was checked.
+        # Streaming frames were already committed; the callback is idempotent.
+        if on_frame is not None:
+            for entry in validated_entries:
+                try:
+                    vlm_worker.validate_observation(entry.get("observation"))
+                except vlm_worker.WorkerError:
+                    continue
+                on_frame({**entry, "type": "frame_result", "job_id": analysis_id})
         return results
 
     def _finalize(
@@ -929,6 +1048,7 @@ class VisionService:
         sampling_total: int,
         frame_cache_hits: int,
         inferences: int,
+        frame_timings: list[dict[str, Any]],
         source_sha: str,
         model: dict[str, Any],
         runtime: dict[str, Any],
@@ -1002,6 +1122,7 @@ class VisionService:
             selection_mode=selection.get("mode", "full"),
             frame_cache_hits=frame_cache_hits,
             inferences=inferences,
+            frame_timings=frame_timings,
             worker_loads=getattr(self, "_worker_loads", 0),
             model_load_s=getattr(self, "_load_s_total", 0.0),
             coverage_status=manifest.get("coverage_status", "unknown"),

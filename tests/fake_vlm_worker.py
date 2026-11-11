@@ -47,9 +47,16 @@ def observation(frame_id: str) -> dict:
 
 def main() -> int:
     mode = os.environ.get("FAKE_VLM_MODE", "ok")
+    if mode == "no_stdin_read":
+        time.sleep(60)
     raw = sys.stdin.read()
     request = json.loads(raw)
     frames = request["frames"]
+    request_log = os.environ.get("FAKE_VLM_REQUESTS")
+    if request_log:
+        with open(request_log, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"started_at": time.monotonic(),
+                                      "frames": [frame["frame_id"] for frame in frames]}) + "\n")
     log_concurrency("start")
 
     if mode == "stdout_noise":
@@ -72,6 +79,10 @@ def main() -> int:
     if mode == "hang":
         time.sleep(60)
         return 0
+    if mode == "long_line":
+        sys.stdout.write("y" * (5 * 1024 * 1024))
+        sys.stdout.flush()
+        return 3
 
     results = []
     for index, frame in enumerate(frames, start=1):
@@ -126,7 +137,7 @@ def main() -> int:
     emit(
         {
             "type": "result",
-            "job_id": request["job_id"],
+            "job_id": "wrong-job" if mode == "wrong_final_job" else request["job_id"],
             "asset_id": request["asset_id"],
             "analysis_id": request["analysis_id"],
             "method": request.get("method", "single_frame"),
@@ -139,6 +150,8 @@ def main() -> int:
             "prompt_version": request.get("prompt_version"),
         }
     )
+    if mode == "final_then_exit7":
+        sys.exit(7)
     log_concurrency("end")
     return 0
 

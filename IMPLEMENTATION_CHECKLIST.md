@@ -326,7 +326,7 @@ implemented/measured. G5 remains **NOT VERIFIED**.
 - [x] Per-frame cache cross-batch/order hit validation; warm rerun 2/2.
 - [x] Full regression: 353 passed, 1 skipped; S01 E2E, note flow and WKWebView 8/8 PASS.
 - [ ] Adaptive resolution/token 3×3 matrix (not run; token telemetry unavailable).
-- [ ] Bounded persistent worker (not implemented; worker-per-batch).
+- [ ] Bounded persistent worker A/B (not implemented; worker-per-batch).
 - [ ] Durable per-frame commit during a running batch (not implemented;
       `communicate()` buffers worker stdout until batch completion).
 - [ ] Human-labelled event recall/false negatives/timestamp accuracy.
@@ -346,6 +346,8 @@ implemented/measured. G5 remains **NOT VERIFIED**.
       stderr flood, valid-frame-then-error, kill after two, resume uniqueness.
 - [x] Real Qwen3-VL kill/resume: first cancelled 1/3 committed, resume complete
       3/3 with 2 new inferences, unique IDs, 0 orphan processes.
+- [x] Real per-frame timing: checkpoint p50 0.448 ms / p95 0.774 ms; first
+      committed frame 25.62 s (model load + first inference).
 - [x] Full regression: 360 passed, 1 skipped (see final run).
 - [ ] Adaptive 448/640/896 × 192/256/320 matrix.
 - [ ] Bounded persistent worker A/B.
@@ -353,4 +355,3 @@ implemented/measured. G5 remains **NOT VERIFIED**.
 
 **GATE: FAIL.** Streaming durability is fixed; adaptive and persistent-worker
 acceptance plus labelled quality remain. G5 remains **NOT VERIFIED**.
-

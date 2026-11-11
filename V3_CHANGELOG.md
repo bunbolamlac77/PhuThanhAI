@@ -68,3 +68,14 @@ V3 là **đặc tả kiến trúc tối ưu hơn V2**, không phải tuyên bố
 - Adaptive resolution/token matrix and persistent worker remain NOT VERIFIED.
   GATE FAIL; G5 NOT VERIFIED.
 
+## S05.4R.2 — Hardening, timing and adaptive matrix
+
+- Bounded chunked JSONL reader, stdin writer thread, exit-code classification,
+  final-result validation before fallback commit, strict checkpoint validation.
+- Per-frame timing: receive/validate/cache/checkpoint/commit/progress + p50/p95.
+- Independent fake-worker request log proves committed frames are not re-sent
+  across batches/resume; 16 stream/durability regressions.
+- Real 3x3 resolution/token matrix: 9/9 strict JSON, wall 7.6-9.7 s, RSS
+  1.4-3.5 GB, MLX 3.8-4.2 GB, swap delta 0; quality NOT VERIFIED.
+- Persistent worker still not implemented. GATE FAIL; G5 NOT VERIFIED.
+

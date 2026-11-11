@@ -306,8 +306,15 @@ enforced, and output is size-capped. A real-model test committed one frame, then
 SIGKILLed the worker: resume observed the remaining two frames with no duplicate
 IDs and no orphan process.
 
-Not done / not verified: adaptive 448/640/896 × 192/256/320 matrix, bounded
-persistent worker, human-labelled event recall, and endurance. See
+Real per-frame commit timing: checkpoint p50 0.448 ms / p95 0.774 ms; first committed frame 25.6 s (model load + inference).
+
+Adaptive 3×3 matrix was measured on one verified real frame: all 9 cells produced
+strict JSON; wall 7.6–9.7 s, RSS 1.4–3.5 GB, MLX 3.8–4.2 GB, zero measured swap
+delta, generation 164–182 tokens (below all caps). Quality/OCR/recall remains
+QUALITY_NOT_VERIFIED, so 640 px/320 tokens remains the default.
+
+Not done / not verified: bounded persistent worker A/B, human-labelled event
+recall, and endurance. See
 `artifacts/qa/S05/optimization/REPORT.md`. G5 remains **NOT VERIFIED**.
 
 ## Known limitations (S00–S05)

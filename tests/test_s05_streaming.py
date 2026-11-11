@@ -113,6 +113,75 @@ class StreamingProtocolTests(StreamingCase):
             1 for frame in evidence["frames"] if frame["interpretation_level"] == "observed"
         ))
 
+    def test_final_then_nonzero_exit_is_not_complete(self) -> None:
+        outcome = self.analyze("final_then_exit7")
+        self.assertEqual(outcome.status, "partial")
+        self.assertIn("worker failed", " ".join(outcome.warnings))
+
+    def test_invalid_final_job_identity_is_rejected(self) -> None:
+        outcome = self.analyze("wrong_final_job")
+        self.assertIn(outcome.status, {"partial", "cancelled"})
+        self.assertLessEqual(outcome.frames_observed, outcome.frames_total)
+
+    def test_long_line_without_newline_is_bounded(self) -> None:
+        outcome = self.analyze("long_line")
+        self.assertIn(outcome.status, {"partial", "cancelled"})
+        self.assertEqual(outcome.frames_observed, 0)
+
+    def test_worker_that_never_reads_stdin_times_out(self) -> None:
+        vision = VisionService(
+            self.service.db, self.settings,
+            runtime_python=Path(sys.executable), worker_module="tests.fake_vlm_worker",
+            model_path=self.model, request_timeout_s=2, batch_size=4, require_governor=False,
+        )
+        outcome = self.analyze("no_stdin_read", vision)
+        self.assertIn(outcome.status, {"partial", "cancelled"})
+        self.assertEqual(PROCESSES.active_count, 0)
+
+    def test_worker_request_log_proves_no_committed_frame_is_reinferred(self) -> None:
+        from tempfile import NamedTemporaryFile
+        handle = NamedTemporaryFile(suffix=".jsonl", delete=False)
+        handle.close()
+        log = Path(handle.name)
+        try:
+            with mock.patch.dict(os.environ, {"FAKE_VLM_REQUESTS": str(log)}):
+                first = self.analyze("kill_after_two", self.vision(batch_size=20))
+                first_requests = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+                evidence = self.vision().load_evidence(self.asset["asset_id"])
+                committed_before = {f["frame_id"] for f in evidence["frames"] if f["interpretation_level"] == "observed"}
+                log.write_text("", encoding="utf-8")
+                second = self.vision(batch_size=20).analyze(self.asset, Path(self.asset["path"]), selection_mode="full")
+                resume_requests = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(first_requests), 1)
+            timing = first.frame_timings[0]
+            self.assertIn("received_ms", timing)
+            self.assertIn("checkpoint_write_ms", timing)
+            self.assertIn("committed_ms", timing)
+            self.assertGreaterEqual(timing["committed_ms"], timing["received_ms"])
+            self.assertIsNotNone(first.to_dict()["checkpoint_p95_ms"])
+            for request in first_requests:
+                self.assertIsInstance(request["frames"], list)
+            for request in resume_requests:
+                self.assertFalse(committed_before & set(request["frames"]), "resume resent a committed frame")
+            self.assertIn(first.status, {"partial", "cancelled", "complete"})
+            self.assertEqual(second.status, "complete")
+        finally:
+            log.unlink(missing_ok=True)
+
+    def test_invalid_checkpoint_observation_is_reinferred_not_accepted(self) -> None:
+        first = self.analyze("ok")
+        checkpoint = first.cache_dir / "analysis_checkpoint.json"
+        data = json.loads(checkpoint.read_text(encoding="utf-8"))
+        frame_id = next(iter(data["results"]))
+        data["results"][frame_id]["observation"] = {"not": "an observation"}
+        checkpoint.write_text(json.dumps(data), encoding="utf-8")
+        shutil.rmtree(self.settings.data.inference / "frames", ignore_errors=True)
+        second = self.vision().analyze(self.asset, Path(self.asset["path"]), selection_mode="full")
+        self.assertEqual(second.status, "complete")
+        self.assertEqual(second.inferences, 1)
+        evidence = self.vision().load_evidence(self.asset["asset_id"])
+        self.assertTrue(all(frame["interpretation_level"] == "observed" for frame in evidence["frames"]))
+
     def test_kill_after_two_frames_resumes_without_reinference(self) -> None:
         first_vision = self.vision(batch_size=20)
         first = self.analyze("kill_after_two", first_vision)
