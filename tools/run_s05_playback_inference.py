@@ -21,7 +21,7 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "artifacts" / "qa" / "S05"
 VENV_PY = REPO / ".venv" / "bin" / "python"
 CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-FOOTAGE = Path("/Users/phuthanh/Video/22.10 POV DamCuoi")
+FOOTAGE = Path(os.environ.get("PHUTHANHAI_TEST_FOOTAGE", "")).expanduser()
 sys.path.insert(0, str(REPO / "tools"))
 sys.path.insert(0, str(REPO / "src"))
 from cdp import CdpSession, page_websocket_url  # noqa: E402
@@ -89,6 +89,9 @@ def seed(data_root: Path) -> tuple[str, str]:
 
 
 def main() -> int:
+    if not FOOTAGE.is_dir():
+        print("PHUTHANHAI_TEST_FOOTAGE is required", file=sys.stderr)
+        return 2
     OUT.mkdir(parents=True, exist_ok=True)
     data_root = Path(tempfile.mkdtemp(prefix="pth_s05pi_"))
     chrome_profile = Path(tempfile.mkdtemp(prefix="pth_s05pi_chrome_"))

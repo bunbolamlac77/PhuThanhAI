@@ -16,7 +16,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "artifacts" / "qa" / "S05"
 DATA = OUT / "endurance_data"
-FOOTAGE = Path("/Users/phuthanh/Video/22.10 POV DamCuoi")
+FOOTAGE = Path(os.environ.get("PHUTHANHAI_TEST_FOOTAGE", "")).expanduser()
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO))
 
@@ -48,6 +48,9 @@ def wait_room(limit_s: float = 180) -> bool:
 
 
 def main() -> int:
+    if not FOOTAGE.is_dir():
+        print("PHUTHANHAI_TEST_FOOTAGE is required", file=sys.stderr)
+        return 2
     OUT.mkdir(parents=True, exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
     os.environ["PHUTHANHAI_DATA_DIR"] = str(DATA)

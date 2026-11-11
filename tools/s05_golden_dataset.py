@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -31,7 +32,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="/Users/phuthanh/Video/22.10 POV DamCuoi")
+    parser.add_argument("--root", default=os.environ.get("PHUTHANHAI_TEST_FOOTAGE", ""))
     parser.add_argument("--count", type=int, default=10)
     args = parser.parse_args()
     root = Path(args.root).expanduser()
