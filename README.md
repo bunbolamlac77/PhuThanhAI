@@ -145,7 +145,7 @@ Evidence is local-only in `artifacts/qa/S02/`.
 | Hard kill | SIGKILL after 5 committed frames → resume extracted 13 + reused 5 = 18 unique; SIGKILL during scan → resume complete |
 | Error paths | disk full → `STORAGE_FULL`; FFmpeg timeout → `FFMPEG_TIMEOUT`; mid-run source change → `SOURCE_CHANGED` |
 | Real footage | 54 clips scanned in 2.9 s; 3 shortest sampled; HEVC 2160×3840; 0 PTS mismatch |
-| Resources | pipeline peak RSS 43 MiB; sampling cache 0.45 MiB (fixtures) + 1.6 MiB (real); gate 147 s wall, 232 s child CPU |
+| Resources | pipeline peak RSS 43 MiB; sampling cache 0.45 MiB (fixtures) + 1.3 MiB (real); gate 147 s wall, 232 s child CPU |
 | UI regression | notes/wall-clock/flush + Space/J/K/L/I/O + textarea suppression all PASS in Chrome |
 
 ## Known limitations (S00–S02)
