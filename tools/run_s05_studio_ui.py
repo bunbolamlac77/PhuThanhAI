@@ -101,10 +101,52 @@ def main() -> int:
         result["asset_cards"] = session.evaluate("document.querySelectorAll('.asset-card').length")
         result["inspector_tabs"] = session.evaluate("document.querySelectorAll('[data-inspector-tab]').length")
         result["panels_mounted"] = session.evaluate("document.querySelectorAll('[role=tabpanel]').length")
+        result["tab_aria"] = session.evaluate("""
+          (() => {
+            const panels = [...document.querySelectorAll('[role=tabpanel]')];
+            return panels.map(panel => {
+              const id = panel.getAttribute('aria-labelledby');
+              const tab = id ? document.getElementById(id) : null;
+              return {
+                panel: panel.id,
+                labelledby: id,
+                resolved: Boolean(tab),
+                role: tab ? tab.getAttribute('role') : null,
+                label: tab ? tab.textContent.trim() : null,
+                controls: tab ? tab.getAttribute('aria-controls') : null,
+              };
+            });
+          })()
+        """)
         # Select a clip and type a note.
         session.evaluate("document.querySelector('.asset-card').click()")
         time.sleep(0.8)
         result["video_present"] = bool(session.evaluate("!!document.querySelector('video')"))
+        result["active_option"] = session.evaluate("""
+          (() => {
+            const card = document.querySelector('.asset-card--active');
+            return card ? {current: card.getAttribute('aria-current'), selected: card.getAttribute('aria-selected')} : null;
+          })()
+        """)
+        src_before_select = session.evaluate("document.querySelector('video')?.currentSrc || ''")
+        filename_before_select = session.evaluate("document.querySelector('.studio-inspector__filename')?.textContent || ''")
+        session.evaluate("document.querySelector('.asset-card--active input[type=checkbox]').click()")
+        time.sleep(0.3)
+        result["after_checkbox"] = session.evaluate("""
+          (() => {
+            const card = document.querySelector('.asset-card--active');
+            return {
+              current: card ? card.getAttribute('aria-current') : null,
+              selected: card ? card.getAttribute('aria-selected') : null,
+              checked: card ? card.querySelector('input[type=checkbox]').checked : null,
+            };
+          })()
+        """)
+        result["checkbox_did_not_change_active"] = (
+            session.evaluate("document.querySelector('video')?.currentSrc || ''") == src_before_select
+            and session.evaluate("document.querySelector('.studio-inspector__filename')?.textContent || ''") == filename_before_select
+        )
+        session.evaluate("document.querySelector('.asset-card--active input[type=checkbox]').click()")
         session.evaluate("document.getElementById('note-input').focus()")
         session.call("Input.insertText", {"text": "Nháp chuyển tab"})
         time.sleep(0.2)
@@ -149,9 +191,17 @@ def main() -> int:
         shot = session.call("Page.captureScreenshot", {"format": "png"})
         (OUT / "studio_ui.png").write_bytes(base64.b64decode(shot["data"]))
         result["screenshot"] = str(OUT / "studio_ui.png")
+        tab_aria_ok = bool(result["tab_aria"]) and all(
+            item["resolved"] and item["role"] == "tab" and item["controls"] == item["panel"]
+            and item["label"] in {"Ghi chú", "Phân tích AI"} for item in result["tab_aria"]
+        )
         result["passed"] = (
             result["workspace_present"] and result["asset_cards"] >= 4
             and result["inspector_tabs"] == 2 and result["panels_mounted"] == 2
+            and tab_aria_ok
+            and result["active_option"] == {"current": "true", "selected": "false"}
+            and result["after_checkbox"] == {"current": "true", "selected": "true", "checked": True}
+            and result["checkbox_did_not_change_active"]
             and result["video_present"] and result["draft_preserved"]
             and result["space_on_tab_ignored"] and result["thumbnail_fallbacks"] > 0
             and "Không có ảnh" in result["fallback_text"]

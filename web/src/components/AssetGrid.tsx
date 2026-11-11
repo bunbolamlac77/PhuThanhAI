@@ -126,7 +126,8 @@ export default function AssetGrid({
               key={asset.asset_id}
               role="option"
               tabIndex={0}
-              aria-selected={active}
+              aria-selected={checked}
+              aria-current={active ? "true" : undefined}
               aria-label={`${asset.filename}, ${formatShort(asset.duration_ms)}`}
               className={[
                 "asset-card",

@@ -239,6 +239,10 @@ two tabs (Ghi chú and Phân tích AI), both kept mounted so drafts, autosave an
 sampling/AI polling survive tab switches.
 
 - Advanced library filters are collapsed under "Bộ lọc nâng cao".
+- Inspector tabs use full ARIA linkage (`aria-controls` / `aria-labelledby` resolve
+  to tab ids). Asset cards use `aria-current="true"` for the active clip and
+  `aria-selected` only for checkbox selection, so activating a clip is not
+  announced as batch-selected.
 - Player shortcuts are suppressed when focus is on a button, tab or summary.
 - WKWebView video fix: the native HEVC/ProRes video layer composited black even
   though frames decoded. Inside WKWebView the Player now (a) loads a poster and

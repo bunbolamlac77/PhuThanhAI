@@ -54,6 +54,7 @@ export default function InspectorTabs({ filename, notes, analysis }: Props) {
       >
         <button
           type="button"
+          id={`${uid}-tab-notes`}
           data-inspector-tab="notes"
           role="tab"
           aria-controls={notesId}
@@ -66,6 +67,7 @@ export default function InspectorTabs({ filename, notes, analysis }: Props) {
         </button>
         <button
           type="button"
+          id={`${uid}-tab-analysis`}
           data-inspector-tab="analysis"
           role="tab"
           aria-controls={analysisId}

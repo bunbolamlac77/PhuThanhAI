@@ -280,6 +280,9 @@ under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
 - [x] Thumbnail fallback UI; backend ffmpeg discovery fixed for Finder-minimal PATH (verified 200 JPEG).
 - [x] Footer no longer shows stale S01/S02–S03 claims.
 - [x] Automated Studio UI E2E: layout ratios, tabs, draft preservation, fallback, resize, keyboard.
+- [x] Focused ARIA regressions: tab ids/labels/controls resolve; active clip uses
+      `aria-current`; checkbox selection uses `aria-selected` and does not change
+      the active player (`tests/test_s05_studio_accessibility.py` + browser E2E).
 - [x] Full pytest, S01 1,000/54 E2E, note flow, app self-test (8/8 codecs, automated a11y).
 - [x] Real WKWebView screenshot `artifacts/qa/S05/studio_app2.png`.
 - [x] WKWebView video visibility: HEVC/ProRes auto-proxy to H.264 + canvas frame
