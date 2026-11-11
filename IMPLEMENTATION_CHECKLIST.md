@@ -334,3 +334,23 @@ implemented/measured. G5 remains **NOT VERIFIED**.
 
 **GATE: FAIL.** G5 remains **NOT VERIFIED**. Do not merge to main or start S06.
 
+## S05.4R.1 — Streaming & durability (PARTIAL; GATE FAIL)
+
+- [x] Streaming JSONL reader: bounded queue, concurrent stderr drain, output cap,
+      increasing sequence, job/asset/frame identity, frame hash and PTS checks.
+- [x] Validated `frame_result` is atomically committed to per-frame cache and
+      checkpoint before progress is emitted.
+- [x] Reader thread never touches SQLite; orchestration thread commits.
+- [x] Retry after crash filters already-committed frames.
+- [x] Tests: duplicate sequence, duplicate frame, invalid JSONL, oversized output,
+      stderr flood, valid-frame-then-error, kill after two, resume uniqueness.
+- [x] Real Qwen3-VL kill/resume: first cancelled 1/3 committed, resume complete
+      3/3 with 2 new inferences, unique IDs, 0 orphan processes.
+- [x] Full regression: 360 passed, 1 skipped (see final run).
+- [ ] Adaptive 448/640/896 × 192/256/320 matrix.
+- [ ] Bounded persistent worker A/B.
+- [ ] Human-labelled recall and endurance.
+
+**GATE: FAIL.** Streaming durability is fixed; adaptive and persistent-worker
+acceptance plus labelled quality remain. G5 remains **NOT VERIFIED**.
+

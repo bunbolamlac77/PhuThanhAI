@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import signal
 import subprocess
 import threading
@@ -54,6 +55,8 @@ from phuthanhai.utils.fs import atomic_write_json
 from phuthanhai.utils.hashes import sha256_file
 
 VISION_VERSION = "s03-vision-1"
+MAX_WORKER_OUTPUT_BYTES = 32 * 1024 * 1024
+MAX_WORKER_STDERR_BYTES = 1024 * 1024
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_TIMEOUT_S = 900.0
 MAX_ATTEMPTS = 3
@@ -328,7 +331,13 @@ class VisionService:
         request: dict[str, Any],
         *,
         cancel: threading.Event | None,
+        on_frame: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
+        """Consume worker JSONL incrementally; never buffer the whole run.
+
+        The reader thread only enqueues bytes. Validation and durable commits run
+        in the orchestration thread (no SQLite access from the reader thread).
+        """
         payload = json.dumps(request, ensure_ascii=False).encode("utf-8")
         if len(payload) > MAX_REQUEST_BYTES:
             raise VisionError("WORKER_REQUEST_TOO_LARGE", "request exceeds the worker size cap")
@@ -337,20 +346,58 @@ class VisionService:
             argv = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", *argv]
         started = time.monotonic()
         popen = PROCESSES.spawn(argv, env=self._worker_env())
-        output: dict[str, bytes] = {"stdout": b"", "stderr": b""}
+        lines: queue.Queue[tuple[str, bytes | None]] = queue.Queue(maxsize=1024)
+        stderr_bytes = bytearray()
+        stderr_lock = threading.Lock()
         timed_out = False
         cancelled = False
+        output_too_large = False
+        expected = {frame["frame_id"]: frame for frame in request.get("frames", [])}
+        seen: set[str] = set()
 
-        def reader() -> None:
-            out, err = popen.communicate(input=payload)
-            output["stdout"] = out or b""
-            output["stderr"] = err or b""
+        def drain_stderr() -> None:
+            try:
+                while True:
+                    chunk = popen.stderr.read(65536) if popen.stderr else b""
+                    if not chunk:
+                        return
+                    with stderr_lock:
+                        if len(stderr_bytes) < MAX_WORKER_STDERR_BYTES:
+                            stderr_bytes.extend(chunk[: MAX_WORKER_STDERR_BYTES - len(stderr_bytes)])
+            except OSError:
+                return
 
-        thread = threading.Thread(target=reader, name="vlm-worker-reader", daemon=True)
+        def read_stdout() -> None:
+            nonlocal output_too_large
+            total = 0
+            try:
+                assert popen.stdout is not None
+                for raw in popen.stdout:
+                    total += len(raw)
+                    if total > MAX_WORKER_OUTPUT_BYTES or len(raw) > MAX_WORKER_OUTPUT_BYTES:
+                        output_too_large = True
+                        lines.put(("too_large", None))
+                        return
+                    lines.put(("line", raw))
+            finally:
+                lines.put(("eof", None))
+
+        err_thread = threading.Thread(target=drain_stderr, name="vlm-worker-stderr", daemon=True)
+        out_thread = threading.Thread(target=read_stdout, name="vlm-worker-stdout", daemon=True)
+        err_thread.start()
+        out_thread.start()
         try:
-            thread.start()
-            # communicate() writes stdin; give it a moment, then poll for cancel/timeout.
-            while thread.is_alive():
+            assert popen.stdin is not None
+            popen.stdin.write(payload)
+            popen.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+        last_seq = 0
+        final: dict[str, Any] | None = None
+        error_event: dict[str, Any] | None = None
+        try:
+            while True:
                 if cancel is not None and cancel.is_set():
                     cancelled = True
                     self._terminate(popen)
@@ -359,46 +406,96 @@ class VisionService:
                     timed_out = True
                     self._terminate(popen)
                     break
-                time.sleep(0.2)
-            thread.join(timeout=10)
+                try:
+                    kind, raw = lines.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if kind == "eof":
+                    break
+                if kind == "too_large":
+                    output_too_large = True
+                    self._terminate(popen)
+                    break
+                assert raw is not None
+                try:
+                    event = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    self._terminate(popen)
+                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker emitted invalid JSONL") from exc
+                if not isinstance(event, dict):
+                    self._terminate(popen)
+                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker event must be an object")
+                seq = event.get("seq")
+                if not isinstance(seq, int) or seq <= last_seq:
+                    self._terminate(popen)
+                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker protocol sequence is not increasing")
+                last_seq = seq
+                event_type = event.get("type")
+                if event_type not in {"worker_ready", "model_loaded", "frame_result", "sequence_result", "result", "error"}:
+                    self._terminate(popen)
+                    raise VisionError("WORKER_PROTOCOL_INVALID", f"unknown worker event: {event_type}")
+                if event.get("job_id") is not None and event.get("job_id") != request["job_id"]:
+                    self._terminate(popen)
+                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker job identity mismatch")
+                if event.get("asset_id") is not None and event.get("asset_id") != request["asset_id"]:
+                    self._terminate(popen)
+                    raise VisionError("WORKER_PROTOCOL_INVALID", "worker asset identity mismatch")
+                if event_type == "frame_result":
+                    frame_id = event.get("frame_id")
+                    if frame_id not in expected:
+                        self._terminate(popen)
+                        raise VisionError("WORKER_PROTOCOL_INVALID", f"frame not in request: {frame_id}")
+                    verified = expected[frame_id]
+                    if event.get("sha256") not in (None, verified.get("sha256")):
+                        self._terminate(popen)
+                        raise VisionError("WORKER_PROTOCOL_INVALID", "frame hash mismatch")
+                    if event.get("normalized_pts_ms") not in (None, int(verified["normalized_pts_ms"])):
+                        self._terminate(popen)
+                        raise VisionError("WORKER_PROTOCOL_INVALID", "frame PTS mismatch")
+                    if event.get("scene_id") not in (None, verified["scene_id"]):
+                        self._terminate(popen)
+                        raise VisionError("WORKER_PROTOCOL_INVALID", "frame scene mismatch")
+                    if on_frame is not None and frame_id not in seen:
+                        on_frame(event)
+                        seen.add(frame_id)
+                elif event_type == "error":
+                    error_event = event
+                elif event_type == "result":
+                    final = event
         finally:
             if popen.poll() is None:
                 self._terminate(popen)
+            try:
+                popen.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._terminate(popen)
+            out_thread.join(timeout=5)
+            err_thread.join(timeout=5)
             PROCESSES.discard(popen.pid)
 
-        stdout = output["stdout"].decode("utf-8", "replace")
-        stderr = output["stderr"].decode("utf-8", "replace")
         if cancelled:
             raise VisionError("WORKER_CANCELLED", "analysis cancelled by operator")
         if timed_out:
             raise VisionError("WORKER_TIMEOUT", f"worker exceeded {self.request_timeout_s}s")
-        events = []
-        for line in stdout.splitlines():
-            if not line.strip():
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                raise VisionError("WORKER_PROTOCOL_INVALID", "worker emitted non-JSON stdout") from exc
-        last_seq = 0
-        for event in events:
-            seq = event.get("seq")
-            if not isinstance(seq, int) or seq <= last_seq:
-                raise VisionError("WORKER_PROTOCOL_INVALID", "worker protocol sequence is not increasing")
-            last_seq = seq
-        error = next((event for event in events if event.get("type") == "error"), None)
-        final = next((event for event in events if event.get("type") == "result"), None)
-        if popen.returncode in (-9, 137) or "MemoryError" in stderr or "out of memory" in stderr.lower():
-            raise VisionError("MODEL_OOM", "worker ran out of memory")
-        if error is not None:
-            raise VisionError(str(error.get("code", "MODEL_INFERENCE_FAILED")), str(error.get("message", ""))[:500])
-        if popen.returncode != 0:
+        if output_too_large:
+            raise VisionError("WORKER_OUTPUT_TOO_LARGE", "worker stdout exceeded the size cap")
+        if error_event is not None:
             raise VisionError(
-                "MODEL_INFERENCE_FAILED",
-                f"worker exited {popen.returncode}: {stderr.strip().splitlines()[-1][:300] if stderr.strip() else 'no stderr'}",
+                str(error_event.get("code", "MODEL_INFERENCE_FAILED")),
+                vlm_worker.redact(str(error_event.get("message", "")))[:500],
             )
         if final is None:
-            raise VisionError("WORKER_PROTOCOL_INVALID", "worker exited without a final result event")
+            raise VisionError("WORKER_CRASHED", "worker exited without a final result event")
+
+        # Legacy/one-shot workers may only send frames in the final result. Commit
+        # any validated frames that were not already streamed.
+        if on_frame is not None:
+            for entry in final.get("frames") or []:
+                frame_id = entry.get("frame_id")
+                if frame_id in expected and frame_id not in seen:
+                    on_frame({**entry, "type": "frame_result", "job_id": request["job_id"]})
+                    seen.add(frame_id)
+
         self._worker_loads = getattr(self, "_worker_loads", 0) + 1
         self._load_s_total = getattr(self, "_load_s_total", 0.0) + float(final.get("load_s") or 0.0)
         self._peak_worker_rss = max(
@@ -572,6 +669,34 @@ class VisionService:
         total = len(frame_refs)
         committed = len(results)
         inferences = 0
+
+        def commit_frame(event: dict[str, Any]) -> None:
+            """Durably commit one validated worker frame before progress advances."""
+            nonlocal inferences
+            frame_id = event.get("frame_id")
+            frame = next((item for item in frame_refs if item["frame_id"] == frame_id), None)
+            if frame is None or frame_id in results:
+                return
+            try:
+                observation = vlm_worker.validate_observation(event.get("observation"))
+            except vlm_worker.WorkerError:
+                # Invalid model output must remain unknown, never committed/cached.
+                return
+            frame_cache.put(cache_keys[frame_id], observation, method=event.get("method", resolved_method))
+            inferences += 1
+            results[frame_id] = {
+                "observation": observation,
+                "method": event.get("method", resolved_method),
+                "elapsed_s": event.get("elapsed_s"),
+                "generation_tokens": event.get("generation_tokens"),
+                "prompt_tokens": event.get("prompt_tokens"),
+                "streamed": True,
+            }
+            self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
+            emit(
+                "inferring", len(results), total,
+                current_scene=frame["scene_id"], worker_state="committed",
+            )
         emit(
             "inferring",
             committed,
@@ -621,13 +746,13 @@ class VisionService:
             try:
                 batch_results = self._infer_with_retries(
                     asset, batch, resolved_method, cancel, checkpoint_path, fingerprint, analysis_id,
-                    results, total,
+                    results, total, on_frame=commit_frame,
                 )
             finally:
                 HEAVY_SLOT.release(owner)
 
             for frame_id, value in batch_results.items():
-                if value.get("observation") is None or value.get("cached"):
+                if value.get("observation") is None or value.get("cached") or value.get("streamed"):
                     continue
                 try:
                     frame_cache.put(cache_keys[frame_id], value["observation"], method=value.get("method", resolved_method))
@@ -648,7 +773,6 @@ class VisionService:
                 restarts += 1
 
         self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
-        inferences = sum(1 for value in results.values() if not value.get("cached"))
         finished_status = "cancelled" if cancel is not None and cancel.is_set() else "complete"
         return self._finalize(
             asset,
@@ -686,13 +810,15 @@ class VisionService:
         analysis_id: str,
         committed: dict[str, Any],
         total: int,
+        *,
+        on_frame: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         current = list(batch)
         attempt = 0
         while True:
             attempt += 1
             try:
-                return self._infer_batch(asset, current, method, cancel, analysis_id)
+                return self._infer_batch(asset, current, method, cancel, analysis_id, on_frame=on_frame)
             except VisionError as exc:
                 if exc.code == "WORKER_CANCELLED":
                     return {}
@@ -711,6 +837,9 @@ class VisionService:
                 self._write_checkpoint(
                     checkpoint_path, fingerprint, analysis_id, method, committed
                 )
+                current = [frame for frame in current if frame["frame_id"] not in committed]
+                if not current:
+                    return {}
                 if exc.code == "MODEL_OOM" and len(current) > 1:
                     current = current[:1]
                 time.sleep(min(2.0, 0.5 * attempt))
@@ -722,6 +851,8 @@ class VisionService:
         method: str,
         cancel: threading.Event | None,
         analysis_id: str,
+        *,
+        on_frame: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         request = {
             "request_version": vlm_worker.REQUEST_VERSION,
@@ -751,7 +882,7 @@ class VisionService:
             "temperature": 0.0,
             "seed": 0,
         }
-        final = self._run_worker(request, cancel=cancel)
+        final = self._run_worker(request, cancel=cancel, on_frame=on_frame)
         if final.get("job_id") != analysis_id or final.get("asset_id") != asset["asset_id"]:
             raise VisionError("WORKER_PROTOCOL_INVALID", "worker result identity mismatch")
         if final.get("analysis_id") != analysis_id:

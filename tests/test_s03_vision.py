@@ -258,8 +258,10 @@ class CancelAndResumeTests(BaseVisionCase):
             require_governor=False,
         )
         first = self.analyze_with(vision, "crash_after_first")
-        self.assertIn(first.status, {"partial", "cancelled"})
-        committed = first.frames_observed
+        # Streaming commits the valid frame that arrived before the crash, so the
+        # first run may now be complete; either way resume must not duplicate it.
+        self.assertIn(first.status, {"complete", "partial", "cancelled"})
+        self.assertGreaterEqual(first.frames_observed, 1)
         second = self.analyze_with(vision, "ok")
         self.assertEqual(second.status, "complete")
         evidence = vision.load_evidence(self.asset["asset_id"])

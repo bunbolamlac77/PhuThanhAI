@@ -298,9 +298,16 @@ Cold sampling fell from ~21.2 s to ~6.5 s after VideoToolbox scan (software scan
 17.6 s; full filter graph adds almost nothing over decode). Hardware/software
 cut and PTS parity passed on real and cuts/rapid/VFR/rotation fixtures.
 
+Worker stdout is now consumed incrementally as JSONL. Every validated
+`frame_result` is committed to the per-frame cache and checkpoint atomically
+before progress advances; a bounded queue keeps parsing out of the reader thread,
+stderr is drained concurrently, sequence/identity/frame/PTS/hash checks are
+enforced, and output is size-capped. A real-model test committed one frame, then
+SIGKILLed the worker: resume observed the remaining two frames with no duplicate
+IDs and no orphan process.
+
 Not done / not verified: adaptive 448/640/896 × 192/256/320 matrix, bounded
-persistent worker, true per-frame durable commit during a batch, human-labelled
-event recall, and endurance. See
+persistent worker, human-labelled event recall, and endurance. See
 `artifacts/qa/S05/optimization/REPORT.md`. G5 remains **NOT VERIFIED**.
 
 ## Known limitations (S00–S05)

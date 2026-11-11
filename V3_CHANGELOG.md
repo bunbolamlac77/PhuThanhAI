@@ -57,3 +57,14 @@ V3 là **đặc tả kiến trúc tối ưu hơn V2**, không phải tuyên bố
 - Still not done: adaptive matrix, persistent worker, per-frame durable commit,
   labelled quality/endurance. GATE FAIL; G5 NOT VERIFIED.
 
+## S05.4R.1 — Streaming & durability
+
+- Worker stdout is consumed as incremental JSONL with bounded queue, concurrent
+  stderr drain, output cap, sequence/identity/frame/PTS/hash validation.
+- Each validated frame is atomically committed to cache + checkpoint before
+  progress; crashes retain committed frames; retry/resume skips them.
+- Real Qwen kill/resume: 1 committed of 3, resume completes remaining 2, no
+  duplicate IDs or orphan processes.
+- Adaptive resolution/token matrix and persistent worker remain NOT VERIFIED.
+  GATE FAIL; G5 NOT VERIFIED.
+
