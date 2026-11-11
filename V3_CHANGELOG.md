@@ -47,3 +47,13 @@ V3 là **đặc tả kiến trúc tối ưu hơn V2**, không phải tuyên bố
 - Not completed: persistent-worker A/B, adaptive-resolution/token matrix,
   human-labelled quality/event recall. G5 still NOT VERIFIED.
 
+## S05.4R — Performance/correctness closure (partial)
+
+- Hard frame budgets; scan cache metric restoration/determinism; plan invalidation.
+- VideoToolbox scan default with fallback; real 12.1 s clip cold sampling 21.2 → 6.5 s.
+- Corrected one-pass benchmark: cold/warm sampling and end-to-end timing; Smart
+  2/3 frames, 23.92 s end-to-end vs Full 32.86 s; cache rerun 2/2.
+- Execution status separated from visual coverage.
+- Still not done: adaptive matrix, persistent worker, per-frame durable commit,
+  labelled quality/endurance. GATE FAIL; G5 NOT VERIFIED.
+

@@ -103,6 +103,8 @@ class VisionOutcome:
     inferences: int = 0
     worker_loads: int = 0
     model_load_s: float = 0.0
+    generation_tokens: int = 0
+    prompt_tokens: int = 0
     peak_worker_rss_bytes: int = 0
     mlx_peak_memory_bytes: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -123,6 +125,8 @@ class VisionOutcome:
             "inferences": self.inferences,
             "worker_loads": self.worker_loads,
             "model_load_s": round(self.model_load_s, 3),
+            "generation_tokens": self.generation_tokens,
+            "prompt_tokens": self.prompt_tokens,
             "coverage_status": self.coverage_status,
             "elapsed_s": round(self.elapsed_s, 3),
             "retries": self.retries,
@@ -765,6 +769,8 @@ class VisionService:
                 "observation": entry.get("observation"),
                 "method": entry.get("method", method),
                 "elapsed_s": entry.get("elapsed_s"),
+                "generation_tokens": entry.get("generation_tokens"),
+                "prompt_tokens": entry.get("prompt_tokens"),
             }
         if seen != expected:
             raise VisionError("WORKER_PROTOCOL_INVALID", "worker skipped frames")
@@ -821,6 +827,12 @@ class VisionService:
             results=results,
             visual_coverage=selection.get("visual_coverage"),
             warnings=warnings,
+        )
+        evidence["execution_status"] = status
+        coverage = evidence.setdefault("visual_coverage", {})
+        coverage["status"] = "partial" if coverage.get("partial") else "complete"
+        coverage["coverage_claim"] = (
+            "selected_verified_frames_only" if coverage.get("partial") else "all_sampling_frames"
         )
         atomic_write_json(evidence_path, evidence)
         observed = sum(1 for entry in evidence["frames"] if entry["interpretation_level"] == "observed")

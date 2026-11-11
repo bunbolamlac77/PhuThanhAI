@@ -430,6 +430,8 @@ export interface AnalysisSummary {
   sampling_frames?: number;
   selected_frames?: number;
   selection_mode?: SelectionMode;
+  execution_status?: string;
+  visual_coverage_status?: string;
   visual_coverage?: {
     selected: number;
     sampling: number;

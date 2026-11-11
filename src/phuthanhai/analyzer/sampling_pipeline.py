@@ -35,7 +35,9 @@ from phuthanhai.analyzer.sampling import (
     build_plan,
     observed_max_gap,
 )
-from phuthanhai.analyzer.scene_scan import SCAN_VERSION, SceneScan, ScanError, SceneSegment, scan_scenes
+from phuthanhai.analyzer.scene_scan import (
+    SCAN_HWACCEL_DEFAULT, SCAN_VERSION, SceneScan, ScanError, SceneSegment, scan_scenes,
+)
 from phuthanhai.analyzer.timeline import (
     EXTRACTOR_VERSION,
     Timeline,
@@ -257,6 +259,7 @@ class SamplingPipeline:
         cancel: threading.Event | None = None,
     ) -> SamplingOutcome:
         started = time.monotonic()
+        marks: dict[str, float] = {"start": started}
         asset_id = asset["asset_id"]
 
         def emit(stage: str, done: int = 0, total: int = 0) -> None:
@@ -273,12 +276,14 @@ class SamplingPipeline:
         emit("hashing")
         source_sha = self._asset_sha(asset, source_path)
         initial_stat = _source_stat(source_path)
+        marks["hashing_done"] = time.monotonic()
 
         emit("timeline")
         try:
             timeline = read_timeline(source_path)
         except TimelineError as exc:
             raise SamplingError(exc.code, str(exc)) from exc
+        marks["timeline_done"] = time.monotonic()
         fingerprint = sampling_fingerprint(
             source_sha256=source_sha,
             profile=profile,
@@ -312,15 +317,18 @@ class SamplingPipeline:
         emit("scanning")
         try:
             scan = scan_scenes(
-                source_path, timeline, cache_path=cache_dir / "scan.json", max_scene_ms=max_scene_ms
+                source_path, timeline, cache_path=cache_dir / "scan.json",
+                max_scene_ms=max_scene_ms, hwaccel=SCAN_HWACCEL_DEFAULT,
             )
         except ScanError as exc:
             raise SamplingError(exc.code, str(exc)) from exc
+        marks["scan_done"] = time.monotonic()
         if cancel is not None and cancel.is_set():
             return self._finish_cancelled(asset, fingerprint, cache_dir, profile, timeline, scan, committed, started)
 
         emit("planning")
-        plan = self._load_plan(cache_dir / "plan.json")
+        # A fresh scan (new metrics or changed decoder) invalidates the cached plan.
+        plan = self._load_plan(cache_dir / "plan.json") if scan.command == ["cached"] else None
         if plan is None:
             try:
                 plan = build_plan(timeline, scan.segments, profile, metrics=scan.frame_metrics)
@@ -328,6 +336,7 @@ class SamplingPipeline:
                 raise SamplingError(exc.code, str(exc)) from exc
             atomic_write_json(cache_dir / "plan.json", plan.to_dict())
 
+        marks["plan_done"] = time.monotonic()
         # A committed frame must still exist on disk; otherwise re-extract it.
         committed = {
             key: value
@@ -433,6 +442,7 @@ class SamplingPipeline:
             ),
         )
 
+        marks["extraction_done"] = time.monotonic()
         observed_gap = observed_max_gap([frame["normalized_pts_ms"] for frame in frames], timeline.duration_ms)
         covered_scenes = {frame["scene_id"] for frame in frames}
         uncovered = [segment.scene_id for segment in scan.segments if segment.scene_id not in covered_scenes]
@@ -483,6 +493,16 @@ class SamplingPipeline:
             "settings": {"max_edge": max_edge, "quality": quality, "max_scene_ms": max_scene_ms},
             "created_at": _now_iso(),
             "warnings": warnings,
+            "stage_timings": {
+                "hashing_s": round(marks["hashing_done"] - marks["start"], 3),
+                "timeline_s": round(marks["timeline_done"] - marks["hashing_done"], 3),
+                "scene_scan_s": round(marks["scan_done"] - marks["timeline_done"], 3),
+                "planning_s": round(marks["plan_done"] - marks["scan_done"], 3),
+                "frame_extraction_s": round(marks["extraction_done"] - marks["plan_done"], 3),
+                "total_s": round(marks["extraction_done"] - marks["start"], 3),
+                "scan_elapsed_s": round(scan.elapsed_s, 3),
+                "scan_cache_hit": scan.command == ["cached"],
+            },
         }
         atomic_write_json(cache_dir / "manifest.json", manifest)
 

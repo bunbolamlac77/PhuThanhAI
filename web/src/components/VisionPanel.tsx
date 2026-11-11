@@ -93,8 +93,9 @@ export default function VisionPanel({ asset, projectId, online, onCompleted, inM
     <div className="vision">
       <div className="vision__head">
         <strong>Phân tích thị giác (Qwen3-VL)</strong>
-        <span className={`badge ${summary?.analysis_status === "complete" ? "badge--ok" : unknown > 0 ? "badge--warn" : ""}`}>
+        <span className={`badge ${summary?.analysis_status === "complete" && summary?.visual_coverage_status === "complete" ? "badge--ok" : unknown > 0 ? "badge--warn" : ""}`}>
           {summary?.analysis_status ?? asset.analysis_status ?? "not_started"}
+          {summary?.visual_coverage_status === "partial" ? " · frame đã chọn" : ""}
         </span>
       </div>
 

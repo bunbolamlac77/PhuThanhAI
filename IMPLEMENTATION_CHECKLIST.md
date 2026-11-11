@@ -300,7 +300,7 @@ under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
       corrupt entries; user-note changes do not invalidate raw frame results.
 - [x] Inspector AI mode selector, selected/sampling, progress, elapsed/ETA,
       In/Out range, deeper analysis, cancel and resume.
-- [x] Tests: planner/cache/API modes/ARIA; 341 passed, 1 skipped.
+- [x] Tests: 353 passed, 1 skipped on S05.4R tree.
 - [x] Real benchmark on 3-frame 4K clip: Smart 2 frames / 22.45 s vs Full
       3 frames / 39.19 s; cache hit 1.0 on rerun; governor refusal recorded.
 - [ ] Bounded persistent worker A/B benchmark (worker-per-batch remains).
@@ -310,4 +310,27 @@ under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
 
 **GATE: FAIL** — required S05.4 worker and adaptive-resolution benchmarks are not
 implemented/measured. G5 remains **NOT VERIFIED**.
+
+## S05.4R — Performance & correctness closure (PARTIAL; GATE FAIL)
+
+- [x] Hard Smart/Balanced budget (100-scene tests, missing scenes explicit).
+- [x] Planner determinism, user-range budget cap, long-scene dedup, empty input.
+- [x] Scan cache restores frame metrics; fresh/cached plans identical; corrupt
+      cache rebuilds; fresh scan invalidates plan.
+- [x] VideoToolbox scan default with software fallback; exact cut/PTS parity on
+      real + cuts/rapid/VFR/rotation.
+- [x] Single-run pipeline stage timings (`stage_timings`) and corrected
+      cold/warm/end-to-end benchmark; no double scan.
+- [x] Execution status separated from partial visual coverage; UI cannot say the
+      whole video was analyzed for Smart.
+- [x] Per-frame cache cross-batch/order hit validation; warm rerun 2/2.
+- [x] Full regression: 353 passed, 1 skipped; S01 E2E, note flow and WKWebView 8/8 PASS.
+- [ ] Adaptive resolution/token 3×3 matrix (not run; token telemetry unavailable).
+- [ ] Bounded persistent worker (not implemented; worker-per-batch).
+- [ ] Durable per-frame commit during a running batch (not implemented;
+      `communicate()` buffers worker stdout until batch completion).
+- [ ] Human-labelled event recall/false negatives/timestamp accuracy.
+- [ ] Endurance and memory-pressure shutdown/live cancel under load.
+
+**GATE: FAIL.** G5 remains **NOT VERIFIED**. Do not merge to main or start S06.
 

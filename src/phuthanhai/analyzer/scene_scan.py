@@ -17,19 +17,23 @@ person boarded a ferry".
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from phuthanhai.analyzer.probe import find_tool
 from phuthanhai.analyzer.timeline import EXTRACTOR_VERSION, Timeline, ffmpeg_version
-from phuthanhai.utils.fs import atomic_write_json, read_json_strict
+from phuthanhai.utils.fs import FsError, atomic_write_json, read_json_strict
 
 SCAN_VERSION = "s02-scan-1"
+# Apple VideoToolbox is opt-out for this offline macOS app; unsupported hosts fall
+# back to software decode inside scan_scenes(). Quality parity is covered by tests.
+SCAN_HWACCEL_DEFAULT = os.environ.get("PHUTHANHAI_SCAN_HWACCEL", "1") != "0"
 SCAN_WIDTH = 160
 CUT_DELTA_THRESHOLD = 30.0
 SCD_SCORE_THRESHOLD = 15.0
@@ -112,12 +116,14 @@ class SceneScan:
             "cuts": len(self.cut_times_ms),
             "cut_times_ms": self.cut_times_ms[:200],
             "segments": [segment.to_dict() for segment in self.segments],
+            "frame_metrics": [asdict(metric) for metric in self.frame_metrics],
             "config": self.config,
             "command": self.command,
         }
 
 
-def _run_scan(path: Path, timeline: Timeline, *, timeout_s: float) -> tuple[list[FrameMetric], str]:
+def _run_scan(path: Path, timeline: Timeline, *, timeout_s: float,
+              hwaccel: bool = False) -> tuple[list[FrameMetric], str]:
     binary = find_tool("ffmpeg")
     if not binary:
         raise ScanError("FFMPEG_MISSING", "ffmpeg not found on PATH")
@@ -131,6 +137,10 @@ def _run_scan(path: Path, timeline: Timeline, *, timeout_s: float) -> tuple[list
         "-v",
         "error",
         "-y",
+    ]
+    if hwaccel:
+        command += ["-hwaccel", "videotoolbox"]
+    command += [
         "-i",
         str(path),
         "-an",
@@ -342,6 +352,7 @@ def scan_scenes(
     cache_path: Path | None = None,
     max_scene_ms: int = 30_000,
     timeout_s: float = 1800.0,
+    hwaccel: bool = False,
 ) -> SceneScan:
     """Scan the full timeline, or reuse a cached scan for the same fingerprint."""
 
@@ -353,6 +364,7 @@ def scan_scenes(
         "dark_luma_threshold": DARK_LUMA_THRESHOLD,
         "blur_threshold": BLUR_THRESHOLD,
         "max_scene_ms": max_scene_ms,
+        "hwaccel": hwaccel,
     }
     if cache_path is not None and cache_path.is_file():
         try:
@@ -374,20 +386,34 @@ def scan_scenes(
                     for item in cached["segments"]
                 ]
                 _validate_coverage(segments, timeline.duration_ms)
+                raw_metrics = cached.get("frame_metrics")
+                expected = int(cached.get("frames_analyzed") or 0)
+                if not isinstance(raw_metrics, list) or len(raw_metrics) != expected:
+                    raise ValueError("cached scan lacks frame metrics")
+                metrics = [FrameMetric(
+                    index=int(item["index"]), pts_ms=int(item["pts_ms"]),
+                    yavg=float(item["yavg"]), uavg=float(item["uavg"]), vavg=float(item["vavg"]),
+                    ydif=float(item["ydif"]), blur=float(item["blur"]), scd_score=float(item["scd_score"]),
+                ) for item in raw_metrics]
                 return SceneScan(
                     timeline=timeline,
                     segments=segments,
                     cut_times_ms=[int(v) for v in cached.get("cut_times_ms", [])],
-                    frame_metrics=[],
+                    frame_metrics=metrics,
                     elapsed_s=0.0,
                     command=["cached"],
                     config=config,
                 )
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, FsError):
             pass  # corrupted cache is rebuilt, never trusted
 
     started = time.monotonic()
-    metrics, command = _run_scan(path, timeline, timeout_s=timeout_s)
+    try:
+        metrics, command = _run_scan(path, timeline, timeout_s=timeout_s, hwaccel=hwaccel)
+    except ScanError:
+        if not hwaccel:
+            raise
+        metrics, command = _run_scan(path, timeline, timeout_s=timeout_s, hwaccel=False)
     cuts = detect_cuts(metrics, timeline.duration_ms)
     segments = build_segments(timeline, metrics, cuts, max_scene_ms=max_scene_ms)
     scan = SceneScan(

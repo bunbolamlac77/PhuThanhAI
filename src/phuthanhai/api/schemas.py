@@ -284,6 +284,8 @@ class AnalysisSummary(BaseModel):
     sampling_frames: int = 0
     selected_frames: int = 0
     selection_mode: str = "full"
+    execution_status: str = "complete"
+    visual_coverage_status: str = "complete"
     visual_coverage: dict[str, Any] = {}
     warnings: list[str]
     evidence: dict[str, Any] | None = None

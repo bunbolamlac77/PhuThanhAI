@@ -129,9 +129,18 @@ def build_selection(
             Selected(frame=frame, reason="full_evidence", score=0.0, priority=False)
             for frame in frames
         ]
-        return _result(mode, manifest, sampling_total, selected, [])
+        return _result(mode, manifest, sampling_total, selected, [], requested_budget=None)
 
-    budget = budget_for(mode) or sampling_total
+    requested_budget = budget_for(mode)
+    budget = requested_budget if requested_budget is not None else sampling_total
+    if budget <= 0:
+        return _result(mode, manifest, sampling_total, [], [
+            {
+                "frame_id": frame["frame_id"], "scene_id": frame["scene_id"],
+                "normalized_pts_ms": frame["normalized_pts_ms"], "reason": "no_budget",
+            }
+            for frame in frames
+        ], requested_budget=requested_budget)
     candidates: list[tuple[float, Selected]] = []
     for frame in frames:
         segment = segments.get(frame["scene_id"], {})
@@ -141,9 +150,13 @@ def build_selection(
 
     selected: list[Selected] = []
     used_scenes: set[str] = set()
-    kept_hashes: dict[str, list[tuple[tuple[int, int], int]]] = {}
-    # First pass: best frame for every scene (never silently lose a scene).
+    kept_signatures: dict[str, list[tuple[tuple[int, int], int]]] = {}
+
+    # Phase 1: one best frame per scene, but never beyond the hard budget.
+    # When scene_count > budget, the highest-scoring scenes win.
     for _, choice in candidates:
+        if len(selected) >= budget:
+            break
         scene = choice.frame["scene_id"]
         if scene in used_scenes:
             continue
@@ -154,8 +167,9 @@ def build_selection(
         used_scenes.add(scene)
         signature = _signature(choice.frame["path"]) if choice.frame.get("path") else None
         if signature is not None:
-            kept_hashes.setdefault(scene, []).append((signature, int(choice.frame["normalized_pts_ms"])))
-    # Second pass: fill budget by score, avoiding near-duplicates.
+            kept_signatures.setdefault(scene, []).append((signature, int(choice.frame["normalized_pts_ms"])))
+
+    # Phase 2: fill remaining budget by score, avoiding near-duplicates.
     for _, choice in candidates:
         if len(selected) >= budget:
             break
@@ -163,17 +177,16 @@ def build_selection(
         if any(item.frame["frame_id"] == frame["frame_id"] for item in selected):
             continue
         signature = _signature(frame["path"]) if frame.get("path") else None
-        previous = kept_hashes.get(frame["scene_id"], [])
-        reason = choice.reason
+        previous = kept_signatures.get(frame["scene_id"], [])
         if not choice.priority and any(
             _near_duplicate(signature, item[0])
             and abs(int(frame["normalized_pts_ms"]) - item[1]) < PHASH_MIN_GAP_MS
             for item in previous
         ):
             continue
-        selected.append(Selected(frame=frame, reason=reason, score=choice.score, priority=choice.priority))
+        selected.append(Selected(frame=frame, reason=choice.reason, score=choice.score, priority=choice.priority))
         if signature is not None:
-            kept_hashes.setdefault(frame["scene_id"], []).append((signature, int(frame["normalized_pts_ms"])))
+            kept_signatures.setdefault(frame["scene_id"], []).append((signature, int(frame["normalized_pts_ms"])))
     selected.sort(key=lambda item: int(item.frame["normalized_pts_ms"]))
     selected_ids = {item.frame["frame_id"] for item in selected}
     dropped = [
@@ -186,17 +199,21 @@ def build_selection(
         for frame in frames
         if frame["frame_id"] not in selected_ids
     ]
-    return _result(mode, manifest, sampling_total, selected, dropped)
+    return _result(mode, manifest, sampling_total, selected, dropped,
+                   requested_budget=requested_budget)
 
 
 def _result(mode: str, manifest: dict[str, Any], sampling_total: int,
-            selected: list[Selected], dropped: list[dict[str, Any]]) -> dict[str, Any]:
+            selected: list[Selected], dropped: list[dict[str, Any]],
+            *, requested_budget: int | None = None) -> dict[str, Any]:
     scene_count = len(manifest.get("segments") or [])
     covered = sorted({item.frame["scene_id"] for item in selected})
     missing = sorted(set(seg["scene_id"] for seg in manifest.get("segments") or []) - set(covered))
     return {
         "mode": mode,
-        "budget": budget_for(mode),
+        "requested_budget": requested_budget,
+        "budget": len(selected) if requested_budget is not None and len(selected) > requested_budget else (requested_budget if requested_budget is not None else sampling_total),
+        "hard_budget": requested_budget is not None,
         "sampling_frames": sampling_total,
         "selected_frames": len(selected),
         "fraction": round(len(selected) / sampling_total, 3) if sampling_total else 0.0,

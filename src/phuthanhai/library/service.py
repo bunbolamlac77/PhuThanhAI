@@ -912,6 +912,8 @@ class LibraryService:
             "sampling_frames": visual_coverage.get("sampling", len(evidence["frames"])),
             "selected_frames": visual_coverage.get("selected", len(evidence["frames"])),
             "selection_mode": visual_coverage.get("mode", "full"),
+            "execution_status": evidence.get("execution_status", "complete"),
+            "visual_coverage_status": visual_coverage.get("status", "complete"),
             "visual_coverage": visual_coverage,
             "analysis_status": asset.get("analysis_status", "not_started"),
             "analysis_id": evidence["analysis_id"],
