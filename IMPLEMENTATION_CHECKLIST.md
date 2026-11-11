@@ -251,3 +251,20 @@ dataset, endurance, live-cancel and accessibility items above are executed.
 
 **G5 next:** owner supplies/authorizes the missing genres and labels, endurance is re-run
 under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
+
+## S05.2 — Final gate closure attempt
+
+> **Result 2026-11-11:** **G5 NOT VERIFIED**. 318 tests pass. QA path bug fixed;
+> golden tool rebuilt with scene/PTS previews; gate now derives status from artifacts.
+> Evidence: `artifacts/qa/S05/{gate.md,gate.json,golden/,endurance.json,endurance_optimized.json,accessibility_manual.json,voiceover_checklist.md}`.
+
+- [x] QA path validator: unset/empty/whitespace/file paths exit 2; no fallback to "."; isolated data roots.
+- [x] Golden manifest: 10 diverse clips, scenes/time ranges, PTS previews, sha256, group-aware split marked unlocked.
+- [x] Review UI (`review.html`) + `s05_apply_labels.py`; owner_confirmed only after human runs it.
+- [x] Gate golden/a11y statuses computed from evidence, not hardcoded.
+- [x] Optimized endurance profile (512 px, batch 1) attempted; governor refused with MEMORY_PRESSURE_RISING (recorded, not bypassed).
+- [ ] 10 confirmed wedding labels + 10 vlog/travel + 10 event/BTS real clips; split locked; held-out metrics.
+- [ ] Sustained real-model endurance past the first batch.
+- [ ] Manual VoiceOver/reduced-motion checklist signed by owner.
+
+**G5 remains NOT VERIFIED until the three items above are completed. No S06/POV.**

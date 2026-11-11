@@ -7,6 +7,7 @@ recorded as protective behaviour and the run stops instead of forcing a pass.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -16,10 +17,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "artifacts" / "qa" / "S05"
 DATA = OUT / "endurance_data"
-FOOTAGE = Path(os.environ.get("PHUTHANHAI_TEST_FOOTAGE", "")).expanduser()
+FOOTAGE_ENV = os.environ.get("PHUTHANHAI_TEST_FOOTAGE")
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO))
 
+from qa_paths import QAPathError, require_source_root  # noqa: E402
 from phuthanhai.config import Settings  # noqa: E402
 from phuthanhai.library.service import LibraryService  # noqa: E402
 from phuthanhai.runtime.resource import GOVERNOR, snapshot  # noqa: E402
@@ -48,22 +50,31 @@ def wait_room(limit_s: float = 180) -> bool:
 
 
 def main() -> int:
-    if not FOOTAGE.is_dir():
-        print("PHUTHANHAI_TEST_FOOTAGE is required", file=sys.stderr)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-edge", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--output", default=str(OUT / "endurance.json"))
+    args = parser.parse_args()
+    try:
+        footage = require_source_root(FOOTAGE_ENV)
+    except QAPathError as exc:
+        print(str(exc), file=sys.stderr)
         return 2
     OUT.mkdir(parents=True, exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
     os.environ["PHUTHANHAI_DATA_DIR"] = str(DATA)
     os.environ["PHUTHANHAI_SANDBOX_WORKER"] = "1"
     service = LibraryService(Settings.load())
-    result: dict = {"clips": [], "governor_refusals": [], "passed": False}
+    service.vision.batch_size = max(1, min(args.batch_size, 8))
+    result: dict = {"clips": [], "governor_refusals": [], "passed": False,
+                    "config": {"max_edge": args.max_edge, "batch_size": service.vision.batch_size}}
     try:
-        project = service.create_project("S05 endurance", str(FOOTAGE))
+        project = service.create_project("S05 endurance", str(footage))
         service.scan(project["project_id"])
         assets = service.list_assets(project["project_id"], sort="duration", limit=3)["items"]
         for asset in assets:
             if asset.get("sampling_status") != "complete":
-                service.pipeline.run(asset, Path(asset["path"]), profile="quick", max_edge=640)
+                service.pipeline.run(asset, Path(asset["path"]), profile="quick", max_edge=args.max_edge)
         for index, asset in enumerate(assets):
             asset = service.get_asset(asset["asset_id"])
             before = mem()
@@ -75,7 +86,16 @@ def main() -> int:
                 result["governor_refusals"].append({"clip": asset["filename"], "code": "WAIT_TIMEOUT", "memory": before})
                 break
             started = time.monotonic()
-            outcome = service.vision.analyze(asset, Path(asset["path"]), method="auto")
+            try:
+                outcome = service.vision.analyze(asset, Path(asset["path"]), method="auto")
+            except Exception as exc:  # governor refusal is a protective outcome, not a crash
+                result["governor_refusals"].append({
+                    "clip": asset["filename"],
+                    "code": getattr(exc, "code", type(exc).__name__),
+                    "message": str(exc),
+                    "memory": before,
+                })
+                break
             elapsed = time.monotonic() - started
             after = mem()
             checkpoint = outcome.cache_dir / "analysis_checkpoint.json"
@@ -108,7 +128,7 @@ def main() -> int:
         # Live cancel on a fresh clip with one-frame batches so a checkpoint exists.
         fresh = service.list_assets(project["project_id"], sort="duration", limit=4)["items"][-1]
         if fresh.get("sampling_status") != "complete":
-            service.pipeline.run(fresh, Path(fresh["path"]), profile="quick", max_edge=640)
+            service.pipeline.run(fresh, Path(fresh["path"]), profile="quick", max_edge=args.max_edge)
         fresh = service.get_asset(fresh["asset_id"])
         service.vision.batch_size = 1
         job = service.start_analysis(fresh["asset_id"], "auto")
@@ -179,7 +199,7 @@ def main() -> int:
         return 0 if result["passed"] else 1
     finally:
         service.close()
-        (OUT / "endurance.json").write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        Path(args.output).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 

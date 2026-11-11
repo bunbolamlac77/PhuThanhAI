@@ -206,7 +206,7 @@ accessibility checks pass. Two mandatory gates remain open.
 
 | Fact | Measured value |
 |---|---|
-| Tests | 314 passed, 0 failed, 1 skipped (optional real-footage scan when env unset) |
+| Tests | 318 passed, 0 failed, 1 skipped (optional real-footage scan when env unset) |
 | Scene timecode | 16/16 sampled frames inside S02 manifest windows; all 16 first frames sat 1–3 s after scene start and now report the true boundary |
 | DB migration | real S03/v4 SQLite → v5: IDs/notes/rating/favorite/tags preserved; repeat no-op; failed migration restores backup |
 | Recognition | 0.800/0.444 → 1.000/0.778 on the **same 2 clips** (not held out) |
@@ -216,18 +216,20 @@ accessibility checks pass. Two mandatory gates remain open.
 | Native app | `.app` launch via Finder/Spotlight, Dock foreground, one app + one backend (parent=app), quit reaps backend and port |
 | WKWebView | 8/8 videos readyState 4: H.264, HEVC 4K, ProRes, rotation, VFR |
 | Accessibility (automated) | `lang=vi`, 10 buttons / 0 unnamed, 19 inputs / 0 unlabeled, 0 images without alt, 39 focusable |
-| Golden dataset | 10 wedding clips captured with frames, **0 labels confirmed**; no authorized vlog/travel or event/BTS footage |
+| Golden dataset | 10 diverse wedding clips, manifest scenes with PTS previews, **0 labels confirmed**; review.html + apply tool; no authorized vlog/travel or event/BTS footage |
 
 ### Why G5 is still NOT VERIFIED
 
-- **Golden dataset:** only 10 wedding clips are available and their labels are
-  `pending`; 10 vlog/travel and 10 event/BTS real clips are missing. No held-out
-  precision/recall can be computed, and the 0.778 recall is on tuning clips.
+- **Golden dataset:** 10 wedding clips are captured with scene/PTS previews and a
+  review UI, but **0 labels are confirmed**; 10 vlog/travel and 10 event/BTS real
+  clips are missing. The split is deliberately unlocked (one shoot = leakage), so
+  no held-out precision/recall exists. The 0.778 recall is on tuning clips.
 - **Real-model endurance:** after one 4-frame batch (swap +2.67 GiB) the
-  ResourceGovernor refused the next clip with `MEMORY_PRESSURE_RISING`; this is
+  ResourceGovernor refused the next clip with `MEMORY_PRESSURE_RISING`; a second
+  safety profile (512 px, batch 1) was also refused before starting. This is
   protective behaviour, but only 1/3 planned clips completed.
-- **Manual VoiceOver/reduced-motion:** automated DOM audit passes; no screen-reader
-  session or system reduced-motion toggle was performed.
+- **Manual VoiceOver/reduced-motion:** automated DOM audit passes; the checklist
+  (`artifacts/qa/S05/voiceover_checklist.md`) and owner confirmation are pending.
 
 ## Known limitations (S00–S05)
 
@@ -251,7 +253,11 @@ accessibility checks pass. Two mandatory gates remain open.
 - **Live Qwen3-VL cancel** and **playback/notes during inference** are verified on the
   real worker; the model job was cancelled while the browser played/seeking and saved a note.
 - **Accessibility:** automated DOM audit passes (names/labels/alt/lang); manual
-  VoiceOver, full focus-order walk and system reduced-motion toggle remain unverified.
+  VoiceOver, full focus-order walk and system reduced-motion toggle remain
+  unverified; the owner checklist is in `artifacts/qa/S05/voiceover_checklist.md`.
+- **QA tools reject empty/invalid footage paths** (unset/empty/whitespace/file),
+  use isolated data roots, and require `PHUTHANHAI_TEST_FOOTAGE`; covered by
+  `tests/test_s05_qa_paths.py`.
 - **POV remains locked**; S06 (script engine/TTS) was not started.
 - **Skipped pytest:** `tests/test_scanner.py::RealFootageScanTests::test_scan_real_folder_read_only`
   skips when `PHUTHANHAI_TEST_FOOTAGE` is unset; this is intentional and matches the gate logs.

@@ -256,13 +256,16 @@ def main() -> int:
 
     endurance = json.loads((OUT / "endurance.json").read_text()) if (OUT / "endurance.json").is_file() else {}
     cancel = endurance.get("cancel", {})
+    optimized = json.loads((OUT / "endurance_optimized.json").read_text()) if (OUT / "endurance_optimized.json").is_file() else {}
+    optimized_refusals = optimized.get("governor_refusals", [])
     steps.append(step(
         "real-model endurance (multi-batch, RSS/MLX/swap)",
         "PASS" if endurance.get("passed") else "NOT VERIFIED",
         f"{endurance.get('completed_clips',0)}/{endurance.get('planned_clips',0)} clips completed; "
         f"deferred_by_governor={bool(endurance.get('governor_refusals'))}; "
-        f"first batch swap delta={round((endurance.get('clips',[{}])[0].get('swap_delta_bytes') or 0)/1024**3,2)} GiB",
-        endurance,
+        f"first batch swap delta={round((endurance.get('clips',[{}])[0].get('swap_delta_bytes') or 0)/1024**3,2)} GiB; "
+        f"optimized 512px/batch1 refusals={[item.get('code') for item in optimized_refusals]}",
+        {"main": endurance, "optimized": optimized},
     ))
     steps.append(step(
         "live Qwen3-VL cancel + resume",
@@ -318,13 +321,26 @@ def main() -> int:
     ))
 
     golden = json.loads((OUT / "golden" / "manifest.json").read_text()) if (OUT / "golden" / "manifest.json").is_file() else {}
+    available = golden.get("available", {})
+    confirmed_by_genre = {
+        genre: sum(1 for row in golden.get("rows", []) if row.get("genre") == genre and row.get("owner_confirmed"))
+        for genre in ("wedding_traditional", "vlog_travel", "event_bts")
+    }
+    split = golden.get("split", {})
+    golden_ready = (
+        all(available.get(genre, 0) >= 10 and confirmed_by_genre.get(genre, 0) >= 10
+            for genre in ("wedding_traditional", "vlog_travel", "event_bts"))
+        and split.get("locked") is True
+        and split.get("held_out_rows", 0) > 0
+        and golden.get("held_out_evaluation") is not None
+    )
     steps.append(step(
         "golden dataset: 3 genres with human labels",
-        "NOT VERIFIED",
-        f"wedding={golden.get('available',{}).get('wedding_traditional',0)} pending labels, "
-        f"vlog_travel={golden.get('available',{}).get('vlog_travel',0)}, event_bts={golden.get('available',{}).get('event_bts',0)}; "
-        "missing authorized footage for two genres and no owner-confirmed labels",
-        golden,
+        "PASS" if golden_ready else "NOT VERIFIED",
+        f"available={available} confirmed={confirmed_by_genre} split_locked={split.get('locked')} "
+        f"held_out_rows={split.get('held_out_rows', 0)} held_out_metrics={golden.get('held_out_evaluation') is not None}",
+        {"available": available, "confirmed": confirmed_by_genre, "split": split,
+         "held_out_evaluation": golden.get("held_out_evaluation")},
     ))
     playback = json.loads((OUT / "playback_inference.json").read_text()) if (OUT / "playback_inference.json").is_file() else {}
     steps.append(step(
@@ -336,11 +352,16 @@ def main() -> int:
         f"final={playback.get('final_state')}",
         playback,
     ))
+    manual_path = OUT / "accessibility_manual.json"
+    manual = json.loads(manual_path.read_text(encoding="utf-8")) if manual_path.is_file() else {}
+    manual_checks = {k: v for k, v in manual.items() if isinstance(v, bool) and k not in {"owner_confirmed"}}
+    manual_ready = bool(manual.get("owner_confirmed")) and bool(manual_checks) and all(manual_checks.values())
     steps.append(step(
         "manual VoiceOver / reduced-motion QA",
-        "NOT VERIFIED",
-        "Automated DOM audit passes; no VoiceOver screen-reader session or system reduced-motion toggle was performed.",
-        {"reduced_motion_matches": a11y.get("reduced_motion")},
+        "PASS" if manual_ready else "NOT VERIFIED",
+        f"owner_confirmed={manual.get('owner_confirmed')} passed={sum(1 for v in manual_checks.values() if v)}/{len(manual_checks)} "
+        f"reduced_motion={manual.get('reduced_motion_confirmed')}",
+        manual,
     ))
 
     leftovers = [line for line in subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout.splitlines()
