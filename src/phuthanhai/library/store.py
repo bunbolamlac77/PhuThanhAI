@@ -127,6 +127,10 @@ _ASSET_COLUMNS = (
     "source_state",
     "sha256",
     "error_code",
+    "sampling_status",
+    "sampling_profile",
+    "sampling_fingerprint",
+    "sampled_at",
     "created_at",
     "updated_at",
 )
@@ -214,6 +218,29 @@ def get_asset(conn: sqlite3.Connection, asset_id: str) -> dict[str, Any]:
     if row is None:
         raise NotFound(f"asset not found: {asset_id}")
     return _asset_row(row)
+
+
+def set_asset_hash(conn: sqlite3.Connection, asset_id: str, sha256: str) -> None:
+    conn.execute(
+        "UPDATE assets SET sha256 = ?, hash_status = 'complete', updated_at = ? WHERE asset_id = ?",
+        (sha256, utc_now_iso(), asset_id),
+    )
+
+
+def set_sampling_state(
+    conn: sqlite3.Connection,
+    asset_id: str,
+    *,
+    status: str,
+    profile: str | None,
+    fingerprint: str | None,
+    sampled_at: str | None,
+) -> None:
+    conn.execute(
+        "UPDATE assets SET sampling_status = ?, sampling_profile = ?, sampling_fingerprint = ?, "
+        "sampled_at = ?, updated_at = ? WHERE asset_id = ?",
+        (status, profile, fingerprint, sampled_at, utc_now_iso(), asset_id),
+    )
 
 
 def set_source_state(conn: sqlite3.Connection, asset_id: str, state: str, error_code: str | None = None) -> None:
@@ -606,6 +633,65 @@ def _review_exists(conn: sqlite3.Connection, asset_id: str) -> bool:
         conn.execute("SELECT 1 FROM review_overlays WHERE asset_id = ?", (asset_id,)).fetchone()
         is not None
     )
+
+
+# --------------------------------------------------------------------------- #
+# Jobs                                                                         #
+# --------------------------------------------------------------------------- #
+
+
+def create_job(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    project_id: str,
+    asset_id: str | None,
+    kind: str,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    conn.execute(
+        "INSERT INTO jobs(job_id, project_id, asset_id, kind, state, progress, error_code, "
+        "created_at, updated_at) VALUES (?,?,?,?,'queued',0,NULL,?,?)",
+        (job_id, project_id, asset_id, kind, now, now),
+    )
+    return get_job(conn, job_id)
+
+
+def update_job(
+    conn: sqlite3.Connection,
+    job_id: str,
+    *,
+    state: str | None = None,
+    progress: float | None = None,
+    error_code: str | None = None,
+) -> dict[str, Any]:
+    job = get_job(conn, job_id)
+    conn.execute(
+        "UPDATE jobs SET state = ?, progress = ?, error_code = ?, updated_at = ? WHERE job_id = ?",
+        (
+            state if state is not None else job["state"],
+            progress if progress is not None else job["progress"],
+            error_code if error_code is not None else job["error_code"],
+            utc_now_iso(),
+            job_id,
+        ),
+    )
+    return get_job(conn, job_id)
+
+
+def get_job(conn: sqlite3.Connection, job_id: str) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+    if row is None:
+        raise NotFound(f"job not found: {job_id}")
+    return dict(row)
+
+
+def list_jobs(conn: sqlite3.Connection, project_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+        (project_id, max(1, min(limit, 500))),
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 # --------------------------------------------------------------------------- #

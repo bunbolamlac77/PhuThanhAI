@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from phuthanhai.library import store
-from phuthanhai.library.db import Database, natural_key
+from phuthanhai.library.db import SCHEMA_VERSION, Database, natural_key
 
 
 class DatabaseTests(unittest.TestCase):
@@ -22,9 +22,9 @@ class DatabaseTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_migrate_is_idempotent(self) -> None:
-        self.assertEqual(self.db.migrate(), 1)
-        self.assertEqual(self.db.migrate(), 1)
-        self.assertEqual(self.db.schema_version(), 1)
+        self.assertEqual(self.db.migrate(), SCHEMA_VERSION)
+        self.assertEqual(self.db.migrate(), SCHEMA_VERSION)
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION)
 
     def test_wal_mode_and_foreign_keys(self) -> None:
         self.db.migrate()

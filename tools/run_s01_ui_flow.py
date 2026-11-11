@@ -251,13 +251,70 @@ def main() -> int:
             "clip1_text_restored": restored == typed,
         }
 
+        # --- S01 keyboard shortcuts, driven through real key events ---
+        def press(key: str, code: str, vk: int) -> None:
+            session.call(
+                "Input.dispatchKeyEvent",
+                {"type": "keyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk, "text": key},
+            )
+            session.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": key, "code": code})
+
+        session.evaluate("document.activeElement && document.activeElement.blur()")
+        session.evaluate("(()=>{const v=document.querySelector('video'); if(v){v.currentTime=0; v.pause();}})()")
+        press(" ", "Space", 32)
+        time.sleep(0.6)
+        playing = session.evaluate("!document.querySelector('video').paused")
+        press("k", "KeyK", 75)
+        time.sleep(0.3)
+        paused_by_k = session.evaluate("document.querySelector('video').paused")
+        before_l = session.evaluate("document.querySelector('video').currentTime")
+        press("l", "KeyL", 76)
+        time.sleep(0.3)
+        after_l = session.evaluate("document.querySelector('video').currentTime")
+        press("j", "KeyJ", 74)
+        time.sleep(0.3)
+        after_j = session.evaluate("document.querySelector('video').currentTime")
+
+        session.evaluate("document.querySelector('video').currentTime=0.4")
+        time.sleep(0.1)
+        press("i", "KeyI", 73)
+        time.sleep(0.2)
+        session.evaluate("document.querySelector('video').currentTime=1.0")
+        time.sleep(0.1)
+        press("o", "KeyO", 79)
+        time.sleep(0.2)
+        marks = session.evaluate(
+            "(()=>{const b=[...document.querySelectorAll('.range-editor__marks button')];"
+            "return b.map(x=>x.textContent.trim());})()"
+        )
+
+        # Typing focus must suppress shortcuts: space inside the textarea must not
+        # start playback.
+        session.evaluate("document.activeElement && document.activeElement.blur()")
+        session.evaluate("document.querySelector('video').pause()")
+        session.evaluate("document.getElementById('note-input').focus()")
+        time.sleep(0.1)
+        press(" ", "Space", 32)
+        time.sleep(0.3)
+        suppressed = session.evaluate(
+            "document.querySelector('video').paused && document.getElementById('note-input').value.includes(' ')"
+        )
+        result["shortcut_checks"] = {
+            "space_plays": bool(playing),
+            "k_pauses": bool(paused_by_k),
+            "l_seeks_forward": after_l > before_l,
+            "j_seeks_back": after_j < after_l,
+            "i_o_marks": len(marks) == 2 and marks[0].startswith("In") and marks[1].startswith("Out"),
+            "textarea_suppresses_shortcuts": bool(suppressed),
+        }
+
         shot = session.call("Page.captureScreenshot", {"format": "png"})
         screenshot = OUT / "ui_flow.png"
         screenshot.write_bytes(base64.b64decode(shot["data"]))
         result["screenshot"] = str(screenshot)
         result["passed"] = all(
             bool(value) for key, value in result["checks"].items() if key != "revision"
-        ) and all(result["flush_checks"].values())
+        ) and all(result["flush_checks"].values()) and all(result.get("shortcut_checks", {}).values())
     except Exception as exc:  # noqa: BLE001 - E2E must report, not crash silently
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["passed"] = False

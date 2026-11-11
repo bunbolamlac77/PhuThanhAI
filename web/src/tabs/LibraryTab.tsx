@@ -6,6 +6,7 @@ import {
   createProject,
   createProjectAnnotation,
   deleteAnnotation,
+  getAsset,
   listAnnotations,
   listAssets,
   listProjects,
@@ -17,6 +18,7 @@ import {
 import AssetGrid from "../components/AssetGrid";
 import NotesPanel, { type SaveStatus } from "../components/NotesPanel";
 import Player, { type PlayerController } from "../components/Player";
+import SamplingPanel from "../components/SamplingPanel";
 import StarRating from "../components/StarRating";
 import { formatBytes } from "../lib/format";
 
@@ -733,6 +735,20 @@ export default function LibraryTab({ online, session }: Props) {
                 />
               </div>
             </div>
+            <SamplingPanel
+              asset={activeAsset}
+              online={online}
+              onCompleted={(assetId) => {
+                void (async () => {
+                  try {
+                    const fresh = await getAsset(assetId);
+                    patchAsset(assetId, () => fresh);
+                  } catch {
+                    // A refresh failure must not hide the completed state already shown.
+                  }
+                })();
+              }}
+            />
             <p className="hint">
               Space play/pause · J/K/L · ←/→ 5s · I/O đặt In/Out · N ghi chú · [ ] clip trước/sau
             </p>

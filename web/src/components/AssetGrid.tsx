@@ -129,6 +129,12 @@ export default function AssetGrid({
                   <span className="badge badge--danger">{asset.source_state}</span>
                 ) : null}
                 {asset.error_code ? <span className="badge badge--danger">{asset.error_code}</span> : null}
+                {asset.sampling_status === "complete" ? (
+                  <span className="badge badge--ok">sampled</span>
+                ) : null}
+                {asset.sampling_status === "sampling" || asset.sampling_status === "queued" ? (
+                  <span className="badge badge--warn">sampling</span>
+                ) : null}
               </div>
             </div>
           );

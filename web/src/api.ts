@@ -69,6 +69,9 @@ export interface Asset {
   color_transfer: string | null;
   preview_status: string;
   analysis_status: string;
+  sampling_status: string;
+  sampling_profile: string | null;
+  sampled_at: string | null;
   source_state: string;
   error_code?: string | null;
   size_bytes: number;
@@ -351,4 +354,52 @@ export function thumbnailUrl(assetId: string): string {
 
 export function cacheStats(): Promise<{ quota_bytes: number; kinds: Record<string, { entries: number; bytes: number }> }> {
   return request("/cache");
+}
+
+
+export type SamplingProfile = "quick" | "detailed" | "thorough";
+
+export interface SamplingJob {
+  job_id: string;
+  project_id: string;
+  asset_id: string | null;
+  kind: string;
+  state: string;
+  progress: number;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  running: boolean;
+}
+
+export interface SamplingSummary {
+  asset_id: string;
+  sampling_status: string;
+  sampling_profile: string | null;
+  sampled_at: string | null;
+  fingerprint: string | null;
+  manifest: {
+    frame_count: number;
+    scene_count: number;
+    observed_max_gap_ms: number | null;
+    expected_max_gap_ms: number | null;
+    coverage: Record<string, unknown> | null;
+    warnings: string[] | null;
+  } | null;
+}
+
+export function startSampling(assetId: string, profile: SamplingProfile): Promise<SamplingJob> {
+  return mutate<SamplingJob>(`/assets/${assetId}:sample`, "POST", { profile });
+}
+
+export function getJob(jobId: string): Promise<SamplingJob> {
+  return request<SamplingJob>(`/jobs/${jobId}`);
+}
+
+export function cancelJob(jobId: string): Promise<SamplingJob> {
+  return mutate<SamplingJob>(`/jobs/${jobId}:cancel`, "POST");
+}
+
+export function fetchSampling(assetId: string): Promise<SamplingSummary> {
+  return request<SamplingSummary>(`/assets/${assetId}/sampling`);
 }

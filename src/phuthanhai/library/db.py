@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -172,7 +172,20 @@ def _migration_v1(conn: sqlite3.Connection) -> None:
         pass
 
 
-MIGRATIONS = (_migration_v1,)
+def _migration_v2(conn: sqlite3.Connection) -> None:
+    """S02: sampling state on assets (internal schema only, not portable)."""
+
+    for statement in (
+        "ALTER TABLE assets ADD COLUMN sampling_status TEXT NOT NULL DEFAULT 'not_sampled'",
+        "ALTER TABLE assets ADD COLUMN sampling_profile TEXT",
+        "ALTER TABLE assets ADD COLUMN sampling_fingerprint TEXT",
+        "ALTER TABLE assets ADD COLUMN sampled_at TEXT",
+    ):
+        conn.execute(statement)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_sampling ON assets(project_id, sampling_status)")
+
+
+MIGRATIONS = (_migration_v1, _migration_v2)
 
 
 class Database:

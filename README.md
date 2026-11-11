@@ -2,9 +2,8 @@
 
 Local-first, offline video library / analyzer for macOS Apple Silicon.
 
-This repository is being built milestone by milestone. **Current state: S01 (Media Library, Quick Preview, Notes).**
-The video analyzer pipeline (adaptive sampling, Qwen3-VL evidence, reports) is S02–S03; the POV tab stays locked
-until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
+This repository is being built milestone by milestone. **Current state: S02 (PTS timeline, scene scan, adaptive sampling).**
+The VLM evidence layer and report assembly are S03–S04; the POV tab stays locked until G0–G5 pass. Gate evidence for S00 and S01 lives in `artifacts/qa/` (git-ignored, regenerate locally).
 
 ## Layout
 
@@ -20,6 +19,11 @@ src/phuthanhai/                 application package
   runtime/{scheduler,resource,checkpoint}.py
   analyzer/{probe,sampler,vlm_worker}.py
   utils/{fs,hashes,logging}.py
+  analyzer/
+    timeline.py                 PTS/rotation/HDR timeline + decoder-verified frames
+    scene_scan.py               full-timeline cuts, dark/blur/motion cues, segments
+    sampling.py                 deterministic quick/detailed/thorough plans
+    sampling_pipeline.py        cache, checkpoints, resume, cancel, provenance
   library/
     db.py                       SQLite WAL registry + migrations
     store.py                    assets/annotations/reviews/cache repositories
@@ -48,9 +52,12 @@ python3 tools/validate_specs.py             # contract-only QA, no model, no app
 python3 -m unittest discover -s tests -v    # test suite (pytest can collect the same files)
 python3 tools/run_s00_gate.py --source /path/to/footage.mp4   # regenerate artifacts/qa/S00 evidence
 python3 tools/run_s01_e2e.py                 # Chrome E2E: 1,000-asset DOM + real playback
-python3 tools/run_s01_ui_flow.py             # Chrome E2E: type note, save, wall-clock, clip switch
+python3 tools/run_s01_ui_flow.py             # Chrome E2E: note flow, flush, shortcuts
+python3 tools/run_s02_kill_resume.py         # hard SIGKILL at two stages + resume proof
 PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
   python3 tools/run_s01_gate.py              # regenerate artifacts/qa/S01 evidence
+PHUTHANHAI_TEST_FOOTAGE=/path/to/footage \
+  python3 tools/run_s02_gate.py              # regenerate artifacts/qa/S02 evidence
 ```
 
 ## Environment separation (non-negotiable)
@@ -122,23 +129,35 @@ The S01 E2E caught two real defects that unit tests could not: a virtualizer tha
 (one column for 1,000 clips) and a clip switch that briefly kept the previous draft in the editor (risk of writing
 clip A's note onto clip B). Both are fixed and regression-guarded.
 
-## Known limitations (S00–S01)
+## S02 gate result on this machine (2026-11-11)
 
-- The **video analyzer** (two-pass sampling, VLM evidence, reports) is not implemented yet (S02–S03); no AI runs when using the library.
+`PHUTHANHAI_TEST_FOOTAGE=<real footage> python3 tools/run_s02_gate.py` → **verdict PASS** (11/11 steps).
+Evidence is local-only in `artifacts/qa/S02/`.
+
+| Fact | Measured value |
+|---|---|
+| Tests | 233 passed, 0 failed, 0 skipped |
+| Fixture matrix | 13 fixtures: CFR, VFR, non-zero start, B-frames, rotation matrix, HLG/HDR, hard cuts, rapid cuts, 40 s no-cut, dark, blurred, short motion, ProRes |
+| PTS accuracy | max abs(decoded − requested) = 66 ms; 0 frames flagged `pts_mismatch` |
+| Scene coverage | cuts exact (1.0/2.0/3.0 s); segments cover `[0, duration)` with no gap/overlap; 40 s no-cut subdivided |
+| Profiles | quick/detailed/thorough deterministic; observed gap recomputed from decoded PTS |
+| Cache | rerun: 0 re-extracted, all cache hits; source change: new fingerprint, full re-extract, note preserved |
+| Hard kill | SIGKILL after 5 committed frames → resume extracted 13 + reused 5 = 18 unique; SIGKILL during scan → resume complete |
+| Error paths | disk full → `STORAGE_FULL`; FFmpeg timeout → `FFMPEG_TIMEOUT`; mid-run source change → `SOURCE_CHANGED` |
+| Real footage | 54 clips scanned in 2.9 s; 3 shortest sampled; HEVC 2160×3840; 0 PTS mismatch |
+| Resources | pipeline peak RSS 43 MiB; sampling cache 0.45 MiB (fixtures) + 1.6 MiB (real); gate 147 s wall, 232 s child CPU |
+| UI regression | notes/wall-clock/flush + Space/J/K/L/I/O + textarea suppression all PASS in Chrome |
+
+## Known limitations (S00–S02)
+
+- **Video Analyzer inference is not implemented yet**: S02 prepares verified frames; Qwen3-VL evidence and reports are S03–S04. No model is loaded while using the library or sampling.
 - **POV** is hard-locked until G0–G5 pass (`POV_LOCKED_UNTIL_G5`).
+- **Negative start PTS**: the normalization path is unit-tested with a synthetic negative origin, but this FFmpeg build rewrites negative timestamps when muxing, so no physical negative-start fixture could be produced. Non-zero and B-frame reordering fixtures are real.
+- **Cancel granularity**: cancellation is cooperative between frame extractions; a long scene-scan FFmpeg pass cannot be interrupted mid-pass (it is bounded by a timeout). The process is always reaped.
+- **CPU/RSS metrics** cover the Python pipeline process. Short-lived FFmpeg children are not RSS-sampled; CPU time for children is reported separately by the gate.
 - Tags are review labels with a filter and editor; **collections/playlists** are not implemented.
-- **ProRes** footage was not available to test; HEVC 4K portrait direct playback and H.264 proxy fallback were verified.
-- Keyboard: shortcuts, in/out marking and clip navigation are implemented; the E2E asserts typing, `]`/`[` navigation
-  and flush-on-switch. Space/seek/I/O are exercised through the same handler but not browser-asserted.
+- ProRes is generated and sampled in the fixture matrix; **ProRes playback in the browser** was not verified.
 - Browser E2E uses headless Chrome (GPU enabled for HEVC); **WKWebView is still not exercised**, and `.app`/Spotlight remain S05.
-- Frame extraction is rotation-agnostic (FFmpeg autorotate + longest-edge cap) and verified on portrait HEVC; VFR/PTS policy is S02.
-  The API exposes no asset endpoints, and the UI shows explicit empty states rather than fake data.
-- `AI_HEAVY` slot arbitration exists and is unit-tested, but no job queue/worker pool is wired until S03.
-- The macOS launcher is a compiling SwiftPM scaffold (`Mach-O arm64`). Actual WKWebView rendering, `.app` bundling,
-  icon and Spotlight registration are S05. `swift build` itself fails on this machine because the Command Line Tools
-  `swift-package` binary aborts with a `dyld` symbol error, and the default `MacOSX27.0.sdk` needs Swift 6.4 while the
-  installed compiler is 6.3.3; the scaffold is therefore compiled with `swiftc` against `MacOSX26.5.sdk`.
-- `mlx-vlm` on this machine is **0.7.10**, while `docs/00_MASTER_ARCH.md` mentions 0.7.12. The installed version is
-  what `doctor` reports and what the smoke test exercised.
-- No git repository exists in this workspace, so no commit hash is reported. `git init` is left to the owner.
-
+- The macOS launcher is a compiling SwiftPM scaffold (`Mach-O arm64`). `swift build` fails on this machine because the Command Line Tools `swift-package` binary aborts with a `dyld` symbol error, and the default `MacOSX27.0.sdk` needs Swift 6.4 while the installed compiler is 6.3.3; the scaffold is built with `swiftc` against `MacOSX26.5.sdk`.
+- `mlx-vlm` on this machine is **0.7.10**, while `docs/00_MASTER_ARCH.md` mentions 0.7.12. The installed version is what `doctor` reports and what the S00 smoke test exercised.
+- The repository is linked to `github.com/bunbolamlac77/PhuThanhAI`; QA evidence and private-footage paths stay out of git (`artifacts/qa/` is ignored).

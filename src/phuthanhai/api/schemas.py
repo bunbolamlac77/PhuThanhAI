@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 Scope = Literal["project", "clip", "time_range"]
 NoteType = Literal["event", "context", "location", "clock_time", "person", "other"]
 ReviewStatus = Literal["unreviewed", "in_review", "reviewed", "needs_attention"]
+SamplingProfile = Literal["quick", "detailed", "thorough"]
 
 
 class ProjectCreate(BaseModel):
@@ -169,6 +170,9 @@ class AssetOut(BaseModel):
     color_transfer: str | None
     preview_status: str
     analysis_status: str
+    sampling_status: str = "not_sampled"
+    sampling_profile: str | None = None
+    sampled_at: str | None = None
     source_state: str
     error_code: str | None = None
     size_bytes: int
@@ -217,3 +221,35 @@ class CacheStats(BaseModel):
 
     quota_bytes: int
     kinds: dict[str, dict[str, int]]
+
+
+class SampleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: SamplingProfile = "detailed"
+
+
+class JobOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    project_id: str
+    asset_id: str | None
+    kind: str
+    state: str
+    progress: float
+    error_code: str | None = None
+    created_at: str
+    updated_at: str
+    running: bool = False
+
+
+class SamplingSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    asset_id: str
+    sampling_status: str
+    sampling_profile: str | None
+    sampled_at: str | None
+    fingerprint: str | None
+    manifest: dict[str, Any] | None = None

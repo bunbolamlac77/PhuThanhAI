@@ -84,12 +84,33 @@ implemented; E2E runs in headless Chrome, not WKWebView.
 
 ## S02 — Two-pass Sampling/PTS/Checkpoint — Gate G2
 
-- [ ] FFprobe PTS start/offset + VFR/timebase, rotation, HLG/PQ/HDR, audio streams.
-- [ ] Scan toàn timeline bằng FFmpeg CV cheap; hard cuts/no-cut/dissolve/dark/motion; scene intervals cover timeline.
-- [ ] Lập frame plan adaptive và event refinement; frame PTS decode verified, không đoán index/fps.
-- [ ] Cache đúng fingerprint và giữ full SHA; thay nguồn phải invalidate; note sửa chỉ invalidate context overlay.
-- [ ] Checkpoint/crash-resume không làm trùng frame; partial warnings đúng; test long clip + many-cuts.
-- [ ] Có dữ liệu baseline speed/size/disk footprint trên Mac.
+> **AI-run result on 2026-11-11** (`MacBookPro18,3`, macOS 26.7.1): **G2 PASS (11/11 gate steps, 233 tests)**.
+> Evidence: `artifacts/qa/S02/{gate.md,gate.json,device_metrics.json,pytest.xml,kill_resume.json,error_paths.log}`.
+> Regenerate: `PHUTHANHAI_TEST_FOOTAGE=<footage> python3 tools/run_s02_gate.py`.
+
+- [x] FFprobe PTS start/offset + VFR/timebase, rotation, HLG/PQ/HDR, audio streams.
+      → `timeline.py`: first presented PTS (incl. non-zero), time base, packet-delta VFR evidence,
+      rotation/display dimensions, SAR/DAR, colour transfer/primaries/HDR flag; fixtures CFR/VFR/non-zero/
+      B-frames/rotation/HLG. Negative start covered by a synthetic-timeline test (no physical fixture possible
+      with this FFmpeg build).
+- [x] Scan toàn timeline bằng FFmpeg CV cheap; hard cuts/no-cut/dissolve/dark/motion; scene intervals cover timeline.
+      → one 160 px pass (`signalstats+scdet+blurdetect+metadata`); luma/chroma delta cut detection catches the
+      first cut that `scdet` misses; segments cover `[0,duration)` with no gap/overlap; 40 s no-cut subdivided.
+- [x] Lập frame plan adaptive và event refinement; frame PTS decode verified, không đoán index/fps.
+      → deterministic quick/detailed/thorough plans; quality-aware anchors; capped motion refinement; every frame
+      extracted with `-copyts` + `showinfo`, requested vs decoded PTS recorded; max offset 66 ms, 0 mismatches.
+- [x] Cache đúng fingerprint và giữ full SHA; thay nguồn phải invalidate; note sửa chỉ invalidate context overlay.
+      → fingerprint = source SHA + profile + extractor/FFmpeg/scan versions + settings; rerun 0 re-extract;
+      source change → new fingerprint, full re-extract, note preserved; stale fingerprint dir removed after commit.
+- [x] Checkpoint/crash-resume không làm trùng frame; partial warnings đúng; test long clip + many-cuts.
+      → atomic checkpoints every 5 frames; SIGKILL at extraction (5 committed → 18 final, unique) and during scan
+      (resume complete); corrupted checkpoint recovered; disk full/timeout/source change have stable codes.
+- [x] Có dữ liệu baseline speed/size/disk footprint trên Mac.
+      → gate metrics: 54 real clips scanned 2.9 s; fixtures + real sampling cache 0.45/1.6 MiB; pipeline peak RSS 43 MiB;
+      per-fixture timings in `gate.json`.
+
+**G2 limitations:** negative-start physical fixture unavailable; cancellation cannot interrupt an in-flight FFmpeg
+scan pass (timeout-bounded); CPU/RSS of short-lived FFmpeg children are not RSS-sampled; no model was loaded in S02.
 
 ## S03 — Qwen3-VL offline / ModelScheduler — Gate G3
 

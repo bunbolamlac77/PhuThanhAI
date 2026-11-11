@@ -30,6 +30,9 @@ from phuthanhai.api.schemas import (
     ProxyResponse,
     ReviewOut,
     ReviewUpdate,
+    JobOut,
+    SampleRequest,
+    SamplingSummary,
     ScanRequest,
     ScanResponse,
 )
@@ -228,6 +231,36 @@ def create_proxy(asset_id: str, request: Request) -> ProxyResponse:
 @router.get("/assets/{asset_id}/preview", response_model=PreviewInfo)
 def preview_info(asset_id: str, request: Request) -> PreviewInfo:
     return PreviewInfo.model_validate(_library(request).preview_info(asset_id))
+
+
+# --------------------------------------------------------------------------- #
+# S02 sampling jobs                                                            #
+# --------------------------------------------------------------------------- #
+
+
+@router.post("/assets/{asset_id}:sample", response_model=JobOut, status_code=202)
+def start_sampling(asset_id: str, payload: SampleRequest, request: Request) -> JobOut:
+    return JobOut.model_validate(_library(request).start_sampling(asset_id, payload.profile))
+
+
+@router.get("/assets/{asset_id}/sampling", response_model=SamplingSummary)
+def sampling_summary(asset_id: str, request: Request) -> SamplingSummary:
+    return SamplingSummary.model_validate(_library(request).sampling_summary(asset_id))
+
+
+@router.get("/projects/{project_id}/jobs", response_model=list[JobOut])
+def list_jobs(project_id: str, request: Request) -> list[JobOut]:
+    return [JobOut.model_validate(job) for job in _library(request).list_jobs(project_id)]
+
+
+@router.get("/jobs/{job_id}", response_model=JobOut)
+def get_job(job_id: str, request: Request) -> JobOut:
+    return JobOut.model_validate(_library(request).get_job(job_id))
+
+
+@router.post("/jobs/{job_id}:cancel", response_model=JobOut)
+def cancel_job(job_id: str, request: Request) -> JobOut:
+    return JobOut.model_validate(_library(request).cancel_sampling(job_id))
 
 
 # --------------------------------------------------------------------------- #

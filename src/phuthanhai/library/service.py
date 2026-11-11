@@ -7,10 +7,15 @@ asset to a file on disk". No route touches SQL or the filesystem directly.
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from phuthanhai.analyzer.sampling import PROFILE_GAPS_MS
+from phuthanhai.analyzer.sampling_pipeline import SamplingError, SamplingPipeline
 from phuthanhai.config import Settings
 from phuthanhai.library import notes as note_rules
 from phuthanhai.library import store
@@ -35,9 +40,14 @@ class LibraryService:
             proxies_dir=settings.data.preview_proxies,
             quota_bytes=quota,
         )
+        self.pipeline = SamplingPipeline(self.db, settings.data.sampling)
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sampling")
+        self._jobs: dict[str, dict[str, Any]] = {}
+        self._jobs_lock = threading.Lock()
 
     # -- lifecycle --------------------------------------------------------- #
     def close(self) -> None:
+        self._executor.shutdown(wait=False, cancel_futures=True)
         self.preview.shutdown()
         self.db.close_current_thread()
 
@@ -279,6 +289,157 @@ class LibraryService:
                 selected_ranges=ranges,
                 last_playhead_ms=playhead,
             )
+
+    # -- sampling jobs ----------------------------------------------------- #
+    def start_sampling(self, asset_id: str, profile: str = "detailed") -> dict[str, Any]:
+        if profile not in PROFILE_GAPS_MS:
+            raise store.StoreError("SAMPLING_PROFILE_INVALID", f"unknown profile: {profile}")
+        asset, path = self.resolve_asset_file(asset_id)
+        with self._jobs_lock:
+            for handle in self._jobs.values():
+                if handle["asset_id"] == asset_id and not handle["future"].done():
+                    raise store.StoreError(
+                        "JOB_ALREADY_RUNNING", "a sampling job is already running for this asset", status=409
+                    )
+        job_id = str(uuid.uuid4())
+        with self.db.write() as conn:
+            store.create_job(conn, job_id=job_id, project_id=asset["project_id"], asset_id=asset_id, kind="sample")
+            store.set_sampling_state(
+                conn,
+                asset_id,
+                status="queued",
+                profile=profile,
+                fingerprint=asset.get("sampling_fingerprint"),
+                sampled_at=asset.get("sampled_at"),
+            )
+        cancel_event = threading.Event()
+        future = self._executor.submit(self._run_sampling_job, job_id, asset, path, profile, cancel_event)
+        with self._jobs_lock:
+            self._jobs[job_id] = {
+                "asset_id": asset_id,
+                "future": future,
+                "cancel": cancel_event,
+                "started": time.monotonic(),
+            }
+        return self.get_job(job_id)
+
+    def _run_sampling_job(self, job_id: str, asset: dict[str, Any], path: Path, profile: str, cancel: threading.Event) -> None:
+        last_update = 0.0
+
+        def progress(payload: dict[str, Any]) -> None:
+            nonlocal last_update
+            now = time.monotonic()
+            if now - last_update < 0.4 and payload.get("fraction", 0) < 1:
+                return
+            last_update = now
+            try:
+                with self.db.write() as conn:
+                    store.update_job(
+                        conn,
+                        job_id,
+                        state="running",
+                        progress=round(0.05 + 0.9 * float(payload.get("fraction", 0.0)), 3),
+                    )
+            except Exception:  # noqa: BLE001 - progress must never kill the job
+                pass
+
+        try:
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="running", progress=0.02)
+                store.set_sampling_state(
+                    conn,
+                    asset["asset_id"],
+                    status="sampling",
+                    profile=profile,
+                    fingerprint=asset.get("sampling_fingerprint"),
+                    sampled_at=asset.get("sampled_at"),
+                )
+            outcome = self.pipeline.run(asset, path, profile=profile, progress=progress, cancel=cancel)
+            with self.db.write() as conn:
+                if outcome.status == "cancelled":
+                    store.update_job(conn, job_id, state="cancelled", progress=round(outcome.cache_hits / max(1, len(outcome.plan.targets)), 3))
+                else:
+                    store.update_job(conn, job_id, state="complete", progress=1.0)
+        except SamplingError as exc:
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="failed", error_code=exc.code)
+                store.set_sampling_state(
+                    conn, asset["asset_id"], status="failed", profile=profile,
+                    fingerprint=asset.get("sampling_fingerprint"), sampled_at=asset.get("sampled_at"),
+                )
+        except Exception as exc:  # noqa: BLE001 - always record a stable code
+            code = getattr(exc, "code", "SAMPLING_FAILED")
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="failed", error_code=str(code))
+                store.set_sampling_state(
+                    conn, asset["asset_id"], status="failed", profile=profile,
+                    fingerprint=asset.get("sampling_fingerprint"), sampled_at=asset.get("sampled_at"),
+                )
+        finally:
+            with self._jobs_lock:
+                self._jobs.pop(job_id, None)
+
+    def cancel_sampling(self, job_id: str) -> dict[str, Any]:
+        with self._jobs_lock:
+            handle = self._jobs.get(job_id)
+        if handle is None:
+            return self.get_job(job_id)
+        handle["cancel"].set()
+        with self.db.write() as conn:
+            store.update_job(conn, job_id, state="cancelling")
+        return self.get_job(job_id)
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        with self.db.read() as conn:
+            job = store.get_job(conn, job_id)
+        with self._jobs_lock:
+            handle = self._jobs.get(job_id)
+        job["running"] = bool(handle and not handle["future"].done())
+        return job
+
+    def list_jobs(self, project_id: str) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        with self.db.read() as conn:
+            return store.list_jobs(conn, project_id)
+
+    def sampling_summary(self, asset_id: str) -> dict[str, Any]:
+        asset = self.get_asset(asset_id)
+        fingerprint = asset.get("sampling_fingerprint")
+        manifest = None
+        if fingerprint:
+            manifest = self.pipeline.load_manifest(asset_id, fingerprint)
+        return {
+            "asset_id": asset_id,
+            "sampling_status": asset.get("sampling_status", "not_sampled"),
+            "sampling_profile": asset.get("sampling_profile"),
+            "sampled_at": asset.get("sampled_at"),
+            "fingerprint": fingerprint,
+            "manifest": None
+            if manifest is None
+            else {
+                "frame_count": len(manifest.get("frames", [])),
+                "scene_count": len(manifest.get("segments", [])),
+                "observed_max_gap_ms": manifest.get("observed_max_gap_ms"),
+                "expected_max_gap_ms": manifest.get("expected_max_gap_ms"),
+                "coverage": manifest.get("coverage"),
+                "warnings": manifest.get("warnings"),
+                "timeline": manifest.get("timeline"),
+                "segments": manifest.get("segments"),
+                "frames": [
+                    {
+                        "frame_id": frame["frame_id"],
+                        "scene_id": frame["scene_id"],
+                        "requested_ms": frame["requested_ms"],
+                        "normalized_pts_ms": frame["normalized_pts_ms"],
+                        "offset_ms": frame["offset_ms"],
+                        "reason": frame["reason"],
+                        "width": frame["width"],
+                        "height": frame["height"],
+                    }
+                    for frame in manifest.get("frames", [])
+                ],
+            },
+        }
 
     # -- diagnostics ------------------------------------------------------- #
     def stats(self) -> dict[str, Any]:
