@@ -1,0 +1,50 @@
+{
+  "$id": "https://phuthanhai.local/schemas/workspace_package.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "extension": {
+      "$ref": "https://phuthanhai.local/schemas/workspace_extension.schema.json"
+    },
+    "kind": {
+      "const": "phuthanhai.workspace_package"
+    },
+    "legacy_bundle": {
+      "$ref": "https://phuthanhai.local/schemas/project_bundle.schema.json"
+    },
+    "package_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "project_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "warnings": {
+      "items": {
+        "maxLength": 4000,
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "schema_version",
+    "package_id",
+    "created_at",
+    "project_id",
+    "legacy_bundle",
+    "extension",
+    "warnings"
+  ],
+  "title": "PhuThanhAI V3 WorkspacePackage 1.0.0",
+  "type": "object"
+}

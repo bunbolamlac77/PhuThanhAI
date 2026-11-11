@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+build/
+*.egg-info/
+
+# Node / Vite build output (reproducible: cd web && npm ci && npm run build)
+web/node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+
+# Swift build output (reproducible: see macos/PhuThanhAI/README.md)
+macos/PhuThanhAI/.build/
+macos/PhuThanhAI/.build-direct/
+
+# macOS
+.DS_Store
+
+# Runtime data must never live in the repo
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# QA evidence stays local: it records /Users/... paths and private footage
+# descriptions. Regenerate with: python3 tools/run_s00_gate.py
+artifacts/qa/

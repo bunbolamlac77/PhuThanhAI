@@ -1,0 +1,329 @@
+{
+  "$defs": {
+    "conflict": {
+      "additionalProperties": false,
+      "properties": {
+        "annotation_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "asset_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "conflict_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "evidence_event_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "explanation": {
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "unresolved",
+            "user_reviewed",
+            "dismissed"
+          ]
+        }
+      },
+      "required": [
+        "conflict_id",
+        "annotation_id",
+        "asset_id",
+        "evidence_event_ids",
+        "status",
+        "explanation"
+      ],
+      "type": "object"
+    },
+    "correction": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "author": {
+          "const": "user"
+        },
+        "corrected_text": {
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "correction_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "frame_ids": {
+          "items": {
+            "pattern": "^F[0-9]{4,}$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "original_text": {
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^S[0-9]{4,}$",
+          "type": "string"
+        },
+        "source_analysis_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "correction_id",
+        "asset_id",
+        "source_analysis_id",
+        "scene_id",
+        "original_text",
+        "corrected_text",
+        "frame_ids",
+        "author",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "end_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "event_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "frame_ids": {
+          "items": {
+            "pattern": "^F[0-9]{4,}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "interpretation_level": {
+          "enum": [
+            "observed",
+            "hypothesis"
+          ]
+        },
+        "method": {
+          "enum": [
+            "multi_frame",
+            "sequential_frames"
+          ]
+        },
+        "source_analysis_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncertainties": {
+          "items": {
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "asset_id",
+        "source_analysis_id",
+        "start_ms",
+        "end_ms",
+        "frame_ids",
+        "method",
+        "description",
+        "interpretation_level",
+        "uncertainties"
+      ],
+      "type": "object"
+    },
+    "review": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "favorite": {
+          "type": "boolean"
+        },
+        "labels": {
+          "items": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "last_playhead_ms": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "note_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "rating": {
+          "oneOf": [
+            {
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "selected_ranges": {
+          "items": {
+            "$ref": "#/$defs/span"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "unreviewed",
+            "in_review",
+            "reviewed",
+            "needs_attention"
+          ]
+        }
+      },
+      "required": [
+        "review_id",
+        "asset_id",
+        "status",
+        "rating",
+        "favorite",
+        "labels",
+        "selected_ranges",
+        "last_playhead_ms",
+        "note_ids"
+      ],
+      "type": "object"
+    },
+    "span": {
+      "additionalProperties": false,
+      "properties": {
+        "end_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_ms",
+        "end_ms"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://phuthanhai.local/schemas/workspace_extension.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "conflicts": {
+      "items": {
+        "$ref": "#/$defs/conflict"
+      },
+      "type": "array"
+    },
+    "corrections": {
+      "items": {
+        "$ref": "#/$defs/correction"
+      },
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/evidence"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "const": "phuthanhai.workspace_extension"
+    },
+    "project_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "reviews": {
+      "items": {
+        "$ref": "#/$defs/review"
+      },
+      "type": "array"
+    },
+    "revision": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    }
+  },
+  "required": [
+    "kind",
+    "schema_version",
+    "project_id",
+    "revision",
+    "created_at",
+    "reviews",
+    "evidence",
+    "corrections",
+    "conflicts"
+  ],
+  "title": "PhuThanhAI V3 WorkspaceExtension 1.0.0",
+  "type": "object"
+}

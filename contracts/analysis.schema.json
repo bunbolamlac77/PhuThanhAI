@@ -1,0 +1,342 @@
+{
+  "$defs": {
+    "analyzer": {
+      "additionalProperties": false,
+      "properties": {
+        "frame_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "profile": {
+          "enum": [
+            "quick",
+            "detailed",
+            "thorough"
+          ]
+        },
+        "sampling_mode": {
+          "const": "adaptive_keyframes"
+        },
+        "vision_only": {
+          "const": true
+        }
+      },
+      "required": [
+        "model_id",
+        "profile",
+        "sampling_mode",
+        "frame_count",
+        "vision_only"
+      ],
+      "type": "object"
+    },
+    "coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "intervals_without_visual_observation": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "minimum": 1,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "is_every_frame_analyzed": {
+          "const": false
+        },
+        "max_gap_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_observed_gap_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "const": "adaptive_keyframes"
+        },
+        "observed_frame_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeline_end_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeline_start_ms": {
+          "const": 0
+        }
+      },
+      "required": [
+        "method",
+        "timeline_start_ms",
+        "timeline_end_ms",
+        "observed_frame_count",
+        "max_gap_ms",
+        "max_observed_gap_ms",
+        "intervals_without_visual_observation",
+        "is_every_frame_analyzed"
+      ],
+      "type": "object"
+    },
+    "observation": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "camera": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^F[0-9]{4,}$",
+          "type": "string"
+        },
+        "lighting": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "objects": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "time_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncertainty": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "visible_text": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "time_ms",
+        "description",
+        "objects",
+        "actions",
+        "camera",
+        "lighting",
+        "visible_text",
+        "uncertainty"
+      ],
+      "type": "object"
+    },
+    "scene": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage_status": {
+          "enum": [
+            "sampled",
+            "missing_observation"
+          ]
+        },
+        "end_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^S[0-9]{4,}$",
+          "type": "string"
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/$defs/observation"
+          },
+          "type": "array"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "uncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "visual_facts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "start_ms",
+        "end_ms",
+        "coverage_status",
+        "summary",
+        "visual_facts",
+        "uncertainties",
+        "observations"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "filename": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "first_video_pts_ms": {
+          "type": "integer"
+        },
+        "fps_nominal": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]+/[1-9][0-9]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_audio": {
+          "type": "boolean"
+        },
+        "height": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "time_origin": {
+          "const": "first_presented_video_frame"
+        },
+        "vfr_detected": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "width": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "filename",
+        "sha256",
+        "duration_ms",
+        "width",
+        "height",
+        "fps_nominal",
+        "vfr_detected",
+        "has_audio",
+        "first_video_pts_ms",
+        "time_origin"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://phuthanhai.invalid/schemas/video_analysis-1.0.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "analysis": {
+      "$ref": "#/$defs/analyzer"
+    },
+    "analysis_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "kind": {
+      "const": "phuthanhai.video_analysis"
+    },
+    "scenes": {
+      "items": {
+        "$ref": "#/$defs/scene"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "analysis_id",
+    "created_at",
+    "status",
+    "source",
+    "analysis",
+    "scenes",
+    "coverage",
+    "warnings"
+  ],
+  "title": "PhuThanhAI AnalysisReport",
+  "type": "object"
+}

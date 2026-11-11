@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phuthanhai"
+version = "3.0.0"
+description = "PhuThanhAI V3.0 - local-first, offline video library and analyzer for macOS Apple Silicon"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "Phu Thanh" }]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "pydantic>=2.7,<3",
+  "jsonschema>=4.18,<5",
+  "referencing>=0.30,<1",
+  "pillow>=10,<14",
+]
+
+[project.scripts]
+phuthanhai = "phuthanhai.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<10",
+  "httpx>=0.27,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phuthanhai"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/phuthanhai", "contracts", "tests", "tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:phuthanhai.*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110

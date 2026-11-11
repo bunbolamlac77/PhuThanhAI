@@ -1,0 +1,276 @@
+{
+  "created_at": "2026-11-11T10:15:00+07:00",
+  "extension": {
+    "conflicts": [],
+    "corrections": [
+      {
+        "asset_id": "2a91a57f-4684-4f5e-8a7f-fd479b94c215",
+        "author": "user",
+        "corrected_text": "Góc quay có mặt nước và một phương tiện gần bờ; chưa xác định rõ loại phương tiện.",
+        "correction_id": "52fb89c2-3ee2-48c2-9ae9-169c87310288",
+        "created_at": "2026-11-11T10:11:00+07:00",
+        "frame_ids": [
+          "F0003",
+          "F0004"
+        ],
+        "original_text": "Góc quay rộng hơn cho thấy mặt nước và một phương tiện ở bờ.",
+        "scene_id": "S0002",
+        "source_analysis_id": "11111111-1111-4111-8111-111111111111"
+      }
+    ],
+    "created_at": "2026-11-11T10:10:00+07:00",
+    "evidence": [
+      {
+        "asset_id": "2a91a57f-4684-4f5e-8a7f-fd479b94c215",
+        "description": "Các frame quan sát mặt nước và phương tiện ven bờ. Chưa đủ bằng chứng về thời điểm lên phà.",
+        "end_ms": 10500,
+        "event_id": "3019d3bb-66af-48f7-bc87-a770bc8fe9c4",
+        "frame_ids": [
+          "F0003",
+          "F0004"
+        ],
+        "interpretation_level": "observed",
+        "method": "sequential_frames",
+        "source_analysis_id": "11111111-1111-4111-8111-111111111111",
+        "start_ms": 6500,
+        "uncertainties": [
+          "Không thể xác định giờ thực tế từ các frame."
+        ]
+      }
+    ],
+    "kind": "phuthanhai.workspace_extension",
+    "project_id": "9b11527e-7cb6-4737-a716-29c5ae28d390",
+    "reviews": [
+      {
+        "asset_id": "2a91a57f-4684-4f5e-8a7f-fd479b94c215",
+        "favorite": true,
+        "labels": [
+          "phà",
+          "ngoại cảnh"
+        ],
+        "last_playhead_ms": 7500,
+        "note_ids": [
+          "3e824ae0-77ca-4553-ac34-ff0fdced7261"
+        ],
+        "rating": 4,
+        "review_id": "71e23e56-77af-4865-ab29-bb44d50592fd",
+        "selected_ranges": [
+          {
+            "end_ms": 12001,
+            "start_ms": 6000
+          }
+        ],
+        "status": "reviewed"
+      }
+    ],
+    "revision": 1,
+    "schema_version": "1.0.0"
+  },
+  "kind": "phuthanhai.workspace_package",
+  "legacy_bundle": {
+    "analyses": [
+      {
+        "analysis": {
+          "frame_count": 4,
+          "model_id": "mlx-community/Qwen3-VL-4B-Instruct-4bit",
+          "profile": "detailed",
+          "sampling_mode": "adaptive_keyframes",
+          "vision_only": true
+        },
+        "analysis_id": "11111111-1111-4111-8111-111111111111",
+        "coverage": {
+          "intervals_without_visual_observation": [],
+          "is_every_frame_analyzed": false,
+          "max_gap_ms": 6000,
+          "max_observed_gap_ms": 3000,
+          "method": "adaptive_keyframes",
+          "observed_frame_count": 4,
+          "timeline_end_ms": 12000,
+          "timeline_start_ms": 0
+        },
+        "created_at": "2026-11-11T13:30:00+07:00",
+        "kind": "phuthanhai.video_analysis",
+        "scenes": [
+          {
+            "coverage_status": "sampled",
+            "end_ms": 6000,
+            "id": "S0001",
+            "observations": [
+              {
+                "actions": [
+                  "đứng cạnh xe"
+                ],
+                "camera": "Góc ngang",
+                "description": "Một người đứng cạnh chiếc xe, phía sau có các tòa nhà thấp.",
+                "id": "F0001",
+                "lighting": "Ánh sáng yếu",
+                "objects": [
+                  "một người",
+                  "một chiếc xe",
+                  "các tòa nhà thấp"
+                ],
+                "time_ms": 1000,
+                "uncertainty": [
+                  "Không đọc được bất cứ biển hiệu nào"
+                ],
+                "visible_text": []
+              },
+              {
+                "actions": [
+                  "bước dọc cạnh xe"
+                ],
+                "camera": null,
+                "description": "Người trong cảnh đang bước dọc cạnh chiếc xe.",
+                "id": "F0002",
+                "lighting": "Ánh sáng yếu",
+                "objects": [
+                  "một người",
+                  "một chiếc xe"
+                ],
+                "time_ms": 4000,
+                "uncertainty": [],
+                "visible_text": []
+              }
+            ],
+            "start_ms": 0,
+            "summary": "Một người đi bộ cạnh chiếc xe đang đỗ, nền có các tòa nhà thấp.",
+            "uncertainties": [
+              "Không xác định được địa điểm chính xác"
+            ],
+            "visual_facts": [
+              "Có một người cạnh xe",
+              "Có công trình thấp phía sau"
+            ]
+          },
+          {
+            "coverage_status": "sampled",
+            "end_ms": 12000,
+            "id": "S0002",
+            "observations": [
+              {
+                "actions": [],
+                "camera": "Góc rộng",
+                "description": "Trong khung hình có mặt nước và phương tiện ở phía xa.",
+                "id": "F0003",
+                "lighting": "Ánh sáng yếu",
+                "objects": [
+                  "mặt nước",
+                  "phương tiện ở xa"
+                ],
+                "time_ms": 7000,
+                "uncertainty": [
+                  "Không xác định rõ phương tiện là gì"
+                ],
+                "visible_text": []
+              },
+              {
+                "actions": [],
+                "camera": null,
+                "description": "Mặt nước vẫn xuất hiện ở tiền cảnh, phương tiện ở xa.",
+                "id": "F0004",
+                "lighting": "Ánh sáng yếu",
+                "objects": [
+                  "mặt nước",
+                  "phương tiện ở xa"
+                ],
+                "time_ms": 10000,
+                "uncertainty": [],
+                "visible_text": []
+              }
+            ],
+            "start_ms": 6000,
+            "summary": "Góc quay rộng hơn cho thấy mặt nước và một phương tiện ở bờ.",
+            "uncertainties": [
+              "Chưa xác định được loại phương tiện hoặc vị trí cụ thể"
+            ],
+            "visual_facts": [
+              "Có mặt nước",
+              "Có một phương tiện gần bờ"
+            ]
+          }
+        ],
+        "schema_version": "1.0.0",
+        "source": {
+          "duration_ms": 12000,
+          "filename": "example.mov",
+          "first_video_pts_ms": 0,
+          "fps_nominal": "30000/1001",
+          "has_audio": true,
+          "height": 1080,
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "time_origin": "first_presented_video_frame",
+          "vfr_detected": false,
+          "width": 1920
+        },
+        "status": "complete",
+        "warnings": [
+          "audio_not_transcribed",
+          "sampled_frames_not_all_frames"
+        ]
+      }
+    ],
+    "annotation_set": {
+      "annotations": [
+        {
+          "annotation_id": "3e824ae0-77ca-4553-ac34-ff0fdced7261",
+          "assertion_status": "user_asserted",
+          "asset_id": "2a91a57f-4684-4f5e-8a7f-fd479b94c215",
+          "created_at": "2026-11-11T09:05:00+07:00",
+          "end_ms": null,
+          "note_type": "event",
+          "revision": 1,
+          "scope": "clip",
+          "source": "user_annotation",
+          "start_ms": null,
+          "text": "Lên phà lúc 5 giờ sáng.",
+          "updated_at": "2026-11-11T09:05:00+07:00",
+          "wall_clock": {
+            "date": null,
+            "precision": "time_of_day",
+            "time_of_day": "05:00",
+            "timezone": null
+          }
+        }
+      ],
+      "kind": "phuthanhai.annotation_set",
+      "project_id": "9b11527e-7cb6-4737-a716-29c5ae28d390",
+      "revision": 1,
+      "schema_version": "1.0.0"
+    },
+    "created_at": "2026-11-11T10:00:00+07:00",
+    "kind": "phuthanhai.project_bundle",
+    "manifest": {
+      "analysis_profile": "general",
+      "assets": [
+        {
+          "analysis_id": "11111111-1111-4111-8111-111111111111",
+          "asset_id": "2a91a57f-4684-4f5e-8a7f-fd479b94c215",
+          "capture_time": null,
+          "capture_time_source": "unknown",
+          "display_filename": "example.mov",
+          "duration_ms": 12000,
+          "review_state": "reviewed",
+          "source_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "tags": [
+            "di-chuyen",
+            "ben-song"
+          ]
+        }
+      ],
+      "created_at": "2026-11-11T09:00:00+07:00",
+      "kind": "phuthanhai.project_manifest",
+      "name": "Buổi quay ngày 11-11",
+      "project_id": "9b11527e-7cb6-4737-a716-29c5ae28d390",
+      "schema_version": "1.0.0"
+    },
+    "project_id": "9b11527e-7cb6-4737-a716-29c5ae28d390",
+    "report_profile": "general",
+    "schema_version": "1.0.0",
+    "temporal_events": [],
+    "warnings": []
+  },
+  "package_id": "0b63d2f8-b3a9-4bd7-a447-2f8f96a52789",
+  "project_id": "9b11527e-7cb6-4737-a716-29c5ae28d390",
+  "schema_version": "1.0.0",
+  "warnings": []
+}

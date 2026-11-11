@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  S05 template - NOT used at S00.
+
+  This Info.plist is checked in so the launcher's eventual .app bundle has a
+  concrete target, but S00 builds the executable directly with swiftc. The
+  NSAllowsLocalNetworking exception is required for WKWebView to load the
+  http://127.0.0.1 backend; it is scoped to local networking only and does not
+  permit arbitrary insecure HTTP.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>PhuThanhAI</string>
+    <key>CFBundleDisplayName</key>
+    <string>PhuThanhAI</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.phuthanh.PhuThanhAI</string>
+    <key>CFBundleExecutable</key>
+    <string>PhuThanhAI</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>3.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

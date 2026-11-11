@@ -1,0 +1,434 @@
+{
+  "$defs": {
+    "annotation": {
+      "additionalProperties": false,
+      "properties": {
+        "annotation_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "assertion_status": {
+          "enum": [
+            "user_asserted",
+            "context_conflict",
+            "confirmed_by_user"
+          ]
+        },
+        "asset_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "end_ms": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "note_type": {
+          "enum": [
+            "event",
+            "context",
+            "location",
+            "clock_time",
+            "person",
+            "other"
+          ]
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "scope": {
+          "enum": [
+            "project",
+            "clip",
+            "time_range"
+          ]
+        },
+        "source": {
+          "const": "user_annotation"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "wall_clock": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/wallClock"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "annotation_id",
+        "scope",
+        "asset_id",
+        "start_ms",
+        "end_ms",
+        "text",
+        "note_type",
+        "source",
+        "assertion_status",
+        "wall_clock",
+        "created_at",
+        "updated_at",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "annotationSet": {
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "items": {
+            "$ref": "#/$defs/annotation"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "phuthanhai.annotation_set"
+        },
+        "project_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0.0"
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "project_id",
+        "revision",
+        "annotations"
+      ],
+      "type": "object"
+    },
+    "asset": {
+      "additionalProperties": false,
+      "properties": {
+        "analysis_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asset_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "capture_time": {
+          "oneOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capture_time_source": {
+          "enum": [
+            "user",
+            "exif",
+            "container",
+            "unknown"
+          ]
+        },
+        "display_filename": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "duration_ms": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "review_state": {
+          "enum": [
+            "unreviewed",
+            "in_review",
+            "reviewed",
+            "needs_attention"
+          ]
+        },
+        "source_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags": {
+          "items": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "asset_id",
+        "display_filename",
+        "source_sha256",
+        "analysis_id",
+        "duration_ms",
+        "review_state",
+        "tags",
+        "capture_time",
+        "capture_time_source"
+      ],
+      "type": "object"
+    },
+    "hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "manifest": {
+      "additionalProperties": false,
+      "properties": {
+        "analysis_profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/asset"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "kind": {
+          "const": "phuthanhai.project_manifest"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "project_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "schema_version": {
+          "const": "1.0.0"
+        }
+      },
+      "required": [
+        "kind",
+        "schema_version",
+        "project_id",
+        "name",
+        "analysis_profile",
+        "created_at",
+        "assets"
+      ],
+      "type": "object"
+    },
+    "profile": {
+      "enum": [
+        "general",
+        "wedding_traditional",
+        "event",
+        "vlog_travel",
+        "documentary",
+        "pov_footage",
+        "custom"
+      ]
+    },
+    "temporalEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "action_summary": {
+          "type": "string"
+        },
+        "asset_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "end_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "evidence_mode": {
+          "enum": [
+            "multi_frame",
+            "sequential_frames"
+          ]
+        },
+        "frame_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "start_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "asset_id",
+        "start_ms",
+        "end_ms",
+        "frame_ids",
+        "action_summary",
+        "evidence_mode",
+        "uncertainties"
+      ],
+      "type": "object"
+    },
+    "uuid": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "wallClock": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "oneOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "precision": {
+          "enum": [
+            "time_of_day",
+            "date_time"
+          ]
+        },
+        "time_of_day": {
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "type": "string"
+        },
+        "timezone": {
+          "oneOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "time_of_day",
+        "date",
+        "timezone",
+        "precision"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://phuthanhai.local/schemas/project_bundle.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "analyses": {
+      "items": {
+        "$ref": "https://phuthanhai.local/schemas/analysis.schema.json"
+      },
+      "type": "array"
+    },
+    "annotation_set": {
+      "$ref": "#/$defs/annotationSet"
+    },
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "kind": {
+      "const": "phuthanhai.project_bundle"
+    },
+    "manifest": {
+      "$ref": "#/$defs/manifest"
+    },
+    "project_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "report_profile": {
+      "$ref": "#/$defs/profile"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "temporal_events": {
+      "items": {
+        "$ref": "#/$defs/temporalEvent"
+      },
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "schema_version",
+    "project_id",
+    "created_at",
+    "manifest",
+    "annotation_set",
+    "analyses",
+    "temporal_events",
+    "warnings",
+    "report_profile"
+  ],
+  "title": "PhuThanhAI ProjectBundle 1.0.0",
+  "type": "object"
+}

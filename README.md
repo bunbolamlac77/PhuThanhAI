@@ -39,7 +39,7 @@ uv run phuthanhai serve --host 127.0.0.1    # loopback-only API, prints the real
 uv run phuthanhai validate --input tests/fixtures/golden_v3.workspace_report_portable.md
 python3 tools/validate_specs.py             # contract-only QA, no model, no app
 python3 -m unittest discover -s tests -v    # test suite (pytest can collect the same files)
-python3 tools/run_s00_gate.py               # regenerate artifacts/qa/S00 evidence
+python3 tools/run_s00_gate.py --source /path/to/footage.mp4   # regenerate artifacts/qa/S00 evidence
 ```
 
 ## Environment separation (non-negotiable)
@@ -59,8 +59,9 @@ Runtime data is written to `~/Library/Application Support/PhuThanhAI/` (override
 
 ## S00 gate result on this machine (2026-11-11)
 
-`python3 tools/run_s00_gate.py` → **verdict PASS** (10/10 steps). Evidence in
-[`artifacts/qa/S00/`](artifacts/qa/S00/gate.md). Measured, not estimated:
+`python3 tools/run_s00_gate.py --source <real footage>` → **verdict PASS** (10/10 steps). Evidence is written to
+`artifacts/qa/S00/gate.md` **locally** and is git-ignored (it records absolute paths and model
+descriptions of private footage - see `artifacts/README.md`). Measured, not estimated:
 
 | Fact | Measured value |
 |---|---|
@@ -70,19 +71,20 @@ Runtime data is written to `~/Library/Application Support/PhuThanhAI/` (override
 | MLX runtime | mlx 0.32.4 · mlx-vlm 0.7.10 · mlx-lm 0.32.2 · Metal available · qwen3_vl supported |
 | FFmpeg / ffprobe | 7.1.1 |
 | Visual model | 5 required artifacts, SHA-256 verified against install manifest |
-| Frame smoke | 896×504 frame @ 5000 ms from 4K H.264 footage |
+| Frame smoke | 504×896 frame @ 5000 ms from a 4K HEVC **portrait** clip (stored 3840×2160, display matrix −90) |
 | Model load | 0.8–1.5 s |
-| Single-frame inference | 7.0–8.2 s warm; 9.5–17.6 s on cold/loaded runs |
-| Peak RSS (worker) | 2.97–3.44 GiB (final 4 runs; 1.3 GiB observed once under different memory conditions) |
+| Single-frame inference | 6.5–8.2 s warm; 9.5–17.6 s on cold/loaded runs |
+| Peak RSS (worker) | 2.26–3.44 GiB across recorded runs |
 | MLX-reported peak memory | 4.11 GiB (stable across 6 runs) |
-| Tests | 102 passed, 0 failed, 0 skipped |
+| Tests | 105 passed, 0 failed, 0 skipped |
 | Offline proof | `sandbox-exec` `deny network*`: curl exit 6, TCP connect blocked; unsandboxed control reachable |
 | Server security | bad host 400 · bad origin 403 · traversal 400 · POST without capability 403 · session file `0600` |
 | Process hygiene | 0 leftover worker/server processes after the run |
 
 ## Known limitations at S00
 
-- Media library, playback, HTTP Range streaming, notes persistence and sampling are **not implemented yet** (S01–S02).
+- Media library, playback, HTTP Range streaming, notes persistence and adaptive sampling are **not implemented yet** (S01–S02).
+- Frame extraction is rotation-agnostic (FFmpeg autorotate + longest-edge cap) and verified on portrait HEVC; VFR/PTS policy is S02.
   The API exposes no asset endpoints, and the UI shows explicit empty states rather than fake data.
 - `AI_HEAVY` slot arbitration exists and is unit-tested, but no job queue/worker pool is wired until S03.
 - The macOS launcher is a compiling SwiftPM scaffold (`Mach-O arm64`). Actual WKWebView rendering, `.app` bundling,
