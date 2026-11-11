@@ -15,8 +15,8 @@ interface Props {
   onLoadMore: () => void;
 }
 
-const CARD_WIDTH = 154;
-const CARD_HEIGHT = 180;
+const CARD_WIDTH = 142;
+const CARD_HEIGHT = 176;
 const GAP = 10;
 
 type ThumbnailState = "loading" | "ready" | "error";
