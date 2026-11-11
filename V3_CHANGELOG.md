@@ -34,3 +34,16 @@
 ## Đánh giá
 
 V3 là **đặc tả kiến trúc tối ưu hơn V2**, không phải tuyên bố ứng dụng hiện tại đạt 100/100. Chỉ số nội dung, performance và stability phải lấy từ Mac thực tế, người dùng review footage thật và log kiểm thử.
+
+## S05.4 — Smart analysis (partial)
+
+- SmartInferencePlanner (smart/balanced/full) over verified S02 manifests, with
+  per-frame selection/drop reasons and explicit partial visual coverage.
+- Per-frame cache keyed by source/frame hash, model/runtime, prompt and generation
+  settings; survives batch/order changes and rejects corrupt entries.
+- Inspector AI mode/progress/ETA/In-Out/cancel/resume; no notes/player changes.
+- Measured real clip: Smart 2 frames / 22.45 s vs Full 3 frames / 39.19 s;
+  frame-cache rerun 2/2 hits. Governor refusal (`MEMORY_PRESSURE_RISING`) recorded.
+- Not completed: persistent-worker A/B, adaptive-resolution/token matrix,
+  human-labelled quality/event recall. G5 still NOT VERIFIED.
+

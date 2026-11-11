@@ -50,6 +50,7 @@ def build_evidence(
     runtime_versions: dict[str, Any],
     frame_refs: list[dict[str, Any]],
     results: dict[str, dict[str, Any]],
+    visual_coverage: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Assemble evidence from verified refs plus per-frame results."""
@@ -112,6 +113,7 @@ def build_evidence(
         "model_identity": model_identity,
         "runtime_versions": runtime_versions,
         "frames": frames,
+        "visual_coverage": visual_coverage or {},
         "warnings": list(warnings or []),
         "is_every_frame_analyzed": False,
         "created_at": _now_iso(),

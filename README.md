@@ -267,6 +267,40 @@ Screenshot: `artifacts/qa/S05/studio_app2.png` (real app window).
 This is a UI-only milestone: contracts, Qwen3-VL, sampling, reports and the G5
 verdict (**NOT VERIFIED**) are unchanged.
 
+## S05.4 Smart Video Analysis (partial)
+
+`src/phuthanhai/analyzer/optimizer.py` adds a SmartInferencePlanner over the
+verified S02 manifest and a per-frame observation cache. Selection never invents
+frames or timestamps; every kept/dropped frame has a reason, and partial visual
+coverage is explicit in evidence (`visual_coverage`, `visual_inference_partial`).
+
+Modes: **Smart** (budget 6 default), **Balanced** (budget 12), **Full Evidence**
+(all sampled frames; API default). Budgets are overridable with
+`PHUTHANHAI_SMART_FRAME_BUDGET` / `PHUTHANHAI_BALANCED_FRAME_BUDGET`.
+The Inspector AI panel exposes mode, selected/sampling frames, progress, elapsed,
+ETA, In/Out range, deeper analysis, cancel and resume. Notes/player remain unchanged.
+
+Measured on a real 12.1 s 4K HEVC clip with 3 verified sampling frames
+(`artifacts/qa/S05/optimization/REPORT.md`):
+
+| | Full baseline | Smart |
+|---|---:|---:|
+| Frames to VLM | 3 | 2 |
+| Elapsed | 39.19 s | 22.45 s |
+| Worker loads | 1 | 1 |
+| Model load | 2.20 s | 1.78 s |
+| Frame-cache rerun | — | 0.09 s, 2/2 hits |
+| Peak worker RSS | 1230 MB | 1691 MB (fresh process, pressured host) |
+
+The first Smart attempt in a three-mode process was refused by the governor
+(`MEMORY_PRESSURE_RISING`, swap 90.9%) and was not bypassed; Smart was measured
+in a fresh process. Balanced had no reduction on this 3-frame clip. These are
+small-sample results; important-event recall is **NOT VERIFIED** (no human labels).
+
+Not implemented/verified in S05.4: bounded persistent worker (worker-per-batch
+remains default), adaptive 448/640/896 px and 192/256/320-token matrix, and
+large-clip/endurance benchmarking. G5 remains **NOT VERIFIED**.
+
 ## Known limitations (S00–S05)
 
 - **G5 is NOT VERIFIED**, not failed: functional/native/security, 5,000-asset, live

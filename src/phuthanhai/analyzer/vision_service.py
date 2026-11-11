@@ -37,6 +37,7 @@ from typing import Any, Callable
 
 from phuthanhai.analyzer import vlm_worker
 from phuthanhai.analyzer.evidence import EvidenceError, build_evidence, validate_evidence
+from phuthanhai.analyzer.optimizer import FrameResultCache, build_selection
 from phuthanhai.analyzer.sampling_pipeline import SamplingError, SamplingPipeline
 from phuthanhai.config import (
     Settings,
@@ -95,6 +96,13 @@ class VisionOutcome:
     elapsed_s: float
     retries: int
     worker_restarts: int
+    sampling_frames: int = 0
+    selected_frames: int = 0
+    selection_mode: str = "full"
+    frame_cache_hits: int = 0
+    inferences: int = 0
+    worker_loads: int = 0
+    model_load_s: float = 0.0
     peak_worker_rss_bytes: int = 0
     mlx_peak_memory_bytes: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -108,6 +116,13 @@ class VisionOutcome:
             "frames_total": self.frames_total,
             "frames_observed": self.frames_observed,
             "frames_unknown": self.frames_unknown,
+            "sampling_frames": self.sampling_frames,
+            "selected_frames": self.selected_frames,
+            "selection_mode": self.selection_mode,
+            "frame_cache_hits": self.frame_cache_hits,
+            "inferences": self.inferences,
+            "worker_loads": self.worker_loads,
+            "model_load_s": round(self.model_load_s, 3),
             "coverage_status": self.coverage_status,
             "elapsed_s": round(self.elapsed_s, 3),
             "retries": self.retries,
@@ -173,6 +188,7 @@ def inference_fingerprint(
     batch_size: int,
     max_tokens: int,
     temperature: float,
+    selection: dict[str, Any] | None = None,
 ) -> str:
     payload = {
         "vision_version": VISION_VERSION,
@@ -186,6 +202,7 @@ def inference_fingerprint(
         "batch_size": batch_size,
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "selection": selection or {},
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -378,6 +395,8 @@ class VisionService:
             )
         if final is None:
             raise VisionError("WORKER_PROTOCOL_INVALID", "worker exited without a final result event")
+        self._worker_loads = getattr(self, "_worker_loads", 0) + 1
+        self._load_s_total = getattr(self, "_load_s_total", 0.0) + float(final.get("load_s") or 0.0)
         self._peak_worker_rss = max(
             getattr(self, "_peak_worker_rss", 0), int(final.get("peak_rss_bytes") or 0)
         )
@@ -393,11 +412,15 @@ class VisionService:
         source_path: Path,
         *,
         method: str = "auto",
+        selection_mode: str = "full",
+        user_ranges: list[list[int]] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
         cancel: threading.Event | None = None,
         job_id: str | None = None,
     ) -> VisionOutcome:
         started = time.monotonic()
+        self._worker_loads = 0
+        self._load_s_total = 0.0
         asset_id = asset["asset_id"]
         retries = 0
         restarts = 0
@@ -457,6 +480,13 @@ class VisionService:
             if still_bad:
                 raise VisionError("FRAME_CACHE_CORRUPTED", "frame cache hashes still mismatch after repair")
 
+        selection = build_selection(manifest, selection_mode, user_ranges=user_ranges)
+        selected_ids = set(selection["frame_ids"])
+        frame_refs = [frame for frame in manifest["frames"] if frame["frame_id"] in selected_ids]
+        if not frame_refs:
+            raise VisionError("SAMPLING_PLAN_EMPTY", "selection produced no frames")
+        sampling_total = len(manifest["frames"])
+
         resolved_method = method
         if resolved_method == "auto":
             resolved_method = "single_frame" if len(frame_refs) == 1 else "sequential_frames"
@@ -480,6 +510,7 @@ class VisionService:
             batch_size=self.batch_size,
             max_tokens=320,
             temperature=0.0,
+            selection={"mode": selection_mode, "frame_ids": selection["frame_ids"]},
         )
         cache_dir = self._cache_dir(asset_id, fingerprint)
         cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -495,6 +526,33 @@ class VisionService:
             if isinstance(value, dict) and isinstance(value.get("observation"), dict)
         }
         results = valid_results
+        frame_cache = FrameResultCache(self.settings.data.inference / "frames")
+        cache_keys: dict[str, str] = {}
+        frame_cache_hits = 0
+        for frame in frame_refs:
+            key = FrameResultCache.key(
+                source_sha=source_sha,
+                frame_sha=str(frame["sha256"]),
+                model=model,
+                runtime=runtime,
+                prompt_version=prompt_version,
+                max_tokens=320,
+                temperature=0.0,
+            )
+            cache_keys[frame["frame_id"]] = key
+            if frame["frame_id"] in results:
+                continue
+            cached = frame_cache.get(key)
+            if cached is not None:
+                results[frame["frame_id"]] = {
+                    "observation": cached["observation"],
+                    "method": cached["method"],
+                    "elapsed_s": 0.0,
+                    "cached": True,
+                }
+                frame_cache_hits += 1
+        if frame_cache_hits:
+            self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
 
         with self.db.write() as conn:
             store.set_analysis_state(
@@ -509,6 +567,7 @@ class VisionService:
         pending = [frame for frame in frame_refs if frame["frame_id"] not in results]
         total = len(frame_refs)
         committed = len(results)
+        inferences = 0
         emit(
             "inferring",
             committed,
@@ -530,6 +589,10 @@ class VisionService:
                     manifest,
                     frame_refs,
                     results,
+                    selection,
+                    sampling_total,
+                    frame_cache_hits,
+                    inferences,
                     source_sha,
                     model,
                     runtime,
@@ -559,6 +622,14 @@ class VisionService:
             finally:
                 HEAVY_SLOT.release(owner)
 
+            for frame_id, value in batch_results.items():
+                if value.get("observation") is None or value.get("cached"):
+                    continue
+                try:
+                    frame_cache.put(cache_keys[frame_id], value["observation"], method=value.get("method", resolved_method))
+                except vlm_worker.WorkerError:
+                    # Invalid observations stay in the evidence as unknown; never cache them.
+                    pass
             results.update(batch_results)
             committed = len(results)
             self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
@@ -573,6 +644,7 @@ class VisionService:
                 restarts += 1
 
         self._write_checkpoint(checkpoint_path, fingerprint, analysis_id, resolved_method, results)
+        inferences = sum(1 for value in results.values() if not value.get("cached"))
         finished_status = "cancelled" if cancel is not None and cancel.is_set() else "complete"
         return self._finalize(
             asset,
@@ -584,6 +656,10 @@ class VisionService:
             manifest,
             frame_refs,
             results,
+            selection,
+            sampling_total,
+            frame_cache_hits,
+            inferences,
             source_sha,
             model,
             runtime,
@@ -705,6 +781,10 @@ class VisionService:
         manifest: dict[str, Any],
         frame_refs: list[dict[str, Any]],
         results: dict[str, Any],
+        selection: dict[str, Any],
+        sampling_total: int,
+        frame_cache_hits: int,
+        inferences: int,
         source_sha: str,
         model: dict[str, Any],
         runtime: dict[str, Any],
@@ -721,6 +801,11 @@ class VisionService:
             warnings.append(
                 f"sampling coverage is {manifest.get('coverage_status')}: evidence is partial"
             )
+        if selection.get("partial"):
+            warnings.append(
+                f"visual_inference_partial: {selection.get('selected_frames')} of "
+                f"{selection.get('sampling_frames')} verified sampling frames were sent to the VLM"
+            )
         evidence = build_evidence(
             analysis_id=analysis_id,
             asset_id=asset["asset_id"],
@@ -734,6 +819,7 @@ class VisionService:
             runtime_versions=runtime,
             frame_refs=frame_refs,
             results=results,
+            visual_coverage=selection.get("visual_coverage"),
             warnings=warnings,
         )
         atomic_write_json(evidence_path, evidence)
@@ -761,6 +847,13 @@ class VisionService:
             frames_total=len(frame_refs),
             frames_observed=observed,
             frames_unknown=unknown,
+            sampling_frames=sampling_total,
+            selected_frames=len(frame_refs),
+            selection_mode=selection.get("mode", "full"),
+            frame_cache_hits=frame_cache_hits,
+            inferences=inferences,
+            worker_loads=getattr(self, "_worker_loads", 0),
+            model_load_s=getattr(self, "_load_s_total", 0.0),
             coverage_status=manifest.get("coverage_status", "unknown"),
             elapsed_s=time.monotonic() - started,
             retries=retries,

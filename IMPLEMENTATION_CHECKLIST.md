@@ -288,3 +288,26 @@ under a cooled memory state, and accessibility is reviewed manually. No S06/POV.
 - [x] WKWebView video visibility: HEVC/ProRes auto-proxy to H.264 + canvas frame
       rendering; portrait video visible (`player_snapshot.png`, `video_fix_selftest.json`).
 - [ ] Manual visual review of spacing/typography by project owner (requested next).
+
+## S05.4 — Smart analysis (PARTIAL; GATE FAIL)
+
+- [x] Real-stage profile: SHA-256, FFprobe, scene scan, plan, extraction, model
+      load, inference, evidence/cache. Scene scan dominates sampling wall time.
+- [x] Smart/Balanced/Full planner with budgets, scene coverage, motion/boundary
+      priority, In/Out priority, luma-aware duplicate suppression and reasons.
+- [x] Partial/unknown coverage is explicit; no timestamp/scene invention.
+- [x] Per-frame cache independent of batch size/order; validates and deletes
+      corrupt entries; user-note changes do not invalidate raw frame results.
+- [x] Inspector AI mode selector, selected/sampling, progress, elapsed/ETA,
+      In/Out range, deeper analysis, cancel and resume.
+- [x] Tests: planner/cache/API modes/ARIA; 341 passed, 1 skipped.
+- [x] Real benchmark on 3-frame 4K clip: Smart 2 frames / 22.45 s vs Full
+      3 frames / 39.19 s; cache hit 1.0 on rerun; governor refusal recorded.
+- [ ] Bounded persistent worker A/B benchmark (worker-per-batch remains).
+- [ ] Adaptive 448/640/896 px and 192/256/320-token quality/speed matrix.
+- [ ] Human-labelled event recall, false negatives, timestamp accuracy.
+- [ ] Large-clip/endurance + memory-pressure acceptance.
+
+**GATE: FAIL** — required S05.4 worker and adaptive-resolution benchmarks are not
+implemented/measured. G5 remains **NOT VERIFIED**.
+

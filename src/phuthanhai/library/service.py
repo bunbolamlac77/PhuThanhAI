@@ -770,9 +770,17 @@ class LibraryService:
         return path.read_bytes(), allowed[name]
 
     # -- visual analysis --------------------------------------------------- #
-    def start_analysis(self, asset_id: str, method: str = "auto") -> dict[str, Any]:
+    def start_analysis(
+        self,
+        asset_id: str,
+        method: str = "auto",
+        selection_mode: str = "full",
+        user_ranges: list[list[int]] | None = None,
+    ) -> dict[str, Any]:
         if method not in {"auto", "single_frame", "sequential_frames", "multi_frame"}:
             raise store.StoreError("ANALYSIS_METHOD_INVALID", f"unknown method: {method}")
+        if selection_mode not in {"smart", "balanced", "full"}:
+            raise store.StoreError("SELECTION_MODE_INVALID", f"unknown selection mode: {selection_mode}")
         asset, path = self.resolve_asset_file(asset_id)
         if asset.get("sampling_status") != "complete":
             raise store.StoreError("SAMPLING_REQUIRED", "run S02 sampling before visual analysis", status=409)
@@ -792,11 +800,14 @@ class LibraryService:
                 coverage=asset.get("analysis_coverage"),
             )
         cancel_event = threading.Event()
-        future = self._executor.submit(self._run_analysis_job, job_id, asset, path, method, cancel_event)
+        future = self._executor.submit(
+            self._run_analysis_job, job_id, asset, path, method, selection_mode, user_ranges, cancel_event
+        )
         with self._jobs_lock:
             self._jobs[job_id] = {
                 "asset_id": asset_id,
                 "kind": "visual_analysis",
+                "selection_mode": selection_mode,
                 "future": future,
                 "cancel": cancel_event,
                 "started": time.monotonic(),
@@ -804,7 +815,14 @@ class LibraryService:
         return self.get_job(job_id)
 
     def _run_analysis_job(
-        self, job_id: str, asset: dict[str, Any], path: Path, method: str, cancel: threading.Event
+        self,
+        job_id: str,
+        asset: dict[str, Any],
+        path: Path,
+        method: str,
+        selection_mode: str,
+        user_ranges: list[list[int]] | None,
+        cancel: threading.Event,
     ) -> None:
         last_update = 0.0
 
@@ -827,7 +845,14 @@ class LibraryService:
             with self.db.write() as conn:
                 store.update_job(conn, job_id, state="running", progress=0.02)
             outcome = self.vision.analyze(
-                asset, path, method=method, progress=progress, cancel=cancel, job_id=job_id
+                asset,
+                path,
+                method=method,
+                selection_mode=selection_mode,
+                user_ranges=user_ranges,
+                progress=progress,
+                cancel=cancel,
+                job_id=job_id,
             )
             with self.db.write() as conn:
                 state = "cancelled" if outcome.status == "cancelled" else "complete"
@@ -881,8 +906,13 @@ class LibraryService:
                 "evidence": None,
             }
         observed = sum(1 for frame in evidence["frames"] if frame["interpretation_level"] == "observed")
+        visual_coverage = evidence.get("visual_coverage") or {}
         return {
             "asset_id": asset_id,
+            "sampling_frames": visual_coverage.get("sampling", len(evidence["frames"])),
+            "selected_frames": visual_coverage.get("selected", len(evidence["frames"])),
+            "selection_mode": visual_coverage.get("mode", "full"),
+            "visual_coverage": visual_coverage,
             "analysis_status": asset.get("analysis_status", "not_started"),
             "analysis_id": evidence["analysis_id"],
             "coverage_status": evidence["coverage_status"],

@@ -122,6 +122,9 @@ def main() -> int:
         session.evaluate("document.querySelector('.asset-card').click()")
         time.sleep(0.8)
         result["video_present"] = bool(session.evaluate("!!document.querySelector('video')"))
+        result["selection_modes"] = session.evaluate("""
+          [...document.querySelectorAll('select[aria-label="Chế độ chọn frame"] option')].map(o => o.value)
+        """)
         result["active_option"] = session.evaluate("""
           (() => {
             const card = document.querySelector('.asset-card--active');
@@ -202,6 +205,7 @@ def main() -> int:
             and result["active_option"] == {"current": "true", "selected": "false"}
             and result["after_checkbox"] == {"current": "true", "selected": "true", "checked": True}
             and result["checkbox_did_not_change_active"]
+            and result["selection_modes"] == ["smart", "balanced", "full"]
             and result["video_present"] and result["draft_preserved"]
             and result["space_on_tab_ignored"] and result["thumbnail_fallbacks"] > 0
             and "Không có ảnh" in result["fallback_text"]

@@ -254,7 +254,11 @@ def start_sampling(asset_id: str, payload: SampleRequest, request: Request) -> J
 
 @router.post("/assets/{asset_id}:analyze", response_model=JobOut, status_code=202)
 def start_analysis(asset_id: str, payload: AnalyzeRequest, request: Request) -> JobOut:
-    return JobOut.model_validate(_library(request).start_analysis(asset_id, payload.method))
+    return JobOut.model_validate(
+        _library(request).start_analysis(
+            asset_id, payload.method, payload.selection_mode, payload.user_ranges
+        )
+    )
 
 
 @router.get("/assets/{asset_id}/analysis", response_model=AnalysisSummary)

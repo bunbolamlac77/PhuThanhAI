@@ -266,6 +266,8 @@ class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     method: Literal["auto", "single_frame", "sequential_frames", "multi_frame"] = "auto"
+    selection_mode: Literal["smart", "balanced", "full"] = "full"
+    user_ranges: list[list[int]] | None = None
 
 
 class AnalysisSummary(BaseModel):
@@ -279,6 +281,10 @@ class AnalysisSummary(BaseModel):
     frames_total: int
     frames_observed: int
     frames_unknown: int
+    sampling_frames: int = 0
+    selected_frames: int = 0
+    selection_mode: str = "full"
+    visual_coverage: dict[str, Any] = {}
     warnings: list[str]
     evidence: dict[str, Any] | None = None
 

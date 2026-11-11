@@ -416,6 +416,7 @@ export function fetchSampling(assetId: string): Promise<SamplingSummary> {
 
 
 export type AnalysisMethod = "auto" | "single_frame" | "sequential_frames" | "multi_frame";
+export type SelectionMode = "smart" | "balanced" | "full";
 
 export interface AnalysisSummary {
   asset_id: string;
@@ -426,6 +427,17 @@ export interface AnalysisSummary {
   frames_total: number;
   frames_observed: number;
   frames_unknown: number;
+  sampling_frames?: number;
+  selected_frames?: number;
+  selection_mode?: SelectionMode;
+  visual_coverage?: {
+    selected: number;
+    sampling: number;
+    fraction: number;
+    partial: boolean;
+    mode?: SelectionMode;
+    scenes_missing?: string[];
+  };
   warnings: string[];
   evidence: {
     analysis_method: string;
@@ -450,8 +462,17 @@ export interface AnalysisSummary {
   } | null;
 }
 
-export function startAnalysis(assetId: string, method: AnalysisMethod): Promise<SamplingJob> {
-  return mutate<SamplingJob>(`/assets/${assetId}:analyze`, "POST", { method });
+export function startAnalysis(
+  assetId: string,
+  method: AnalysisMethod,
+  selectionMode: SelectionMode = "full",
+  userRanges?: Array<[number, number]>,
+): Promise<SamplingJob> {
+  return mutate<SamplingJob>(`/assets/${assetId}:analyze`, "POST", {
+    method,
+    selection_mode: selectionMode,
+    ...(userRanges && userRanges.length > 0 ? { user_ranges: userRanges } : {}),
+  });
 }
 
 export function fetchAnalysis(assetId: string): Promise<AnalysisSummary> {

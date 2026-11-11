@@ -814,6 +814,8 @@ export default function LibraryTab({ online, session }: Props) {
                 asset={activeAsset}
                 projectId={project?.project_id ?? ""}
                 online={online}
+                inMs={inMs}
+                outMs={outMs}
                 onCompleted={(assetId) => {
                   void (async () => {
                     try {
