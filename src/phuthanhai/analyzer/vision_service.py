@@ -733,7 +733,12 @@ class VisionService:
                     warnings=["cancelled by operator; committed frames are reusable"],
                 )
 
-            batch = pending[start : start + self.batch_size]
+            # A crashed/partial earlier batch may have committed some of these
+            # frames; never send a committed frame to the model again.
+            batch = [frame for frame in pending[start : start + self.batch_size]
+                     if frame["frame_id"] not in results]
+            if not batch:
+                continue
             if self.require_governor:
                 allowed, reason = GOVERNOR.can_start_heavy_worker()
                 if not allowed:
@@ -813,7 +818,9 @@ class VisionService:
         *,
         on_frame: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        current = list(batch)
+        current = [frame for frame in batch if frame["frame_id"] not in committed]
+        if not current:
+            return {}
         attempt = 0
         while True:
             attempt += 1

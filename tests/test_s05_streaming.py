@@ -102,6 +102,17 @@ class StreamingProtocolTests(StreamingCase):
             return
         self.assertGreaterEqual(outcome.frames_observed, 1)
 
+    def test_multi_batch_kill_does_not_reinfer_committed_frames(self) -> None:
+        vision = self.vision(batch_size=2)
+        outcome = self.analyze("kill_after_two", vision)
+        self.assertLessEqual(outcome.inferences, outcome.frames_total)
+        evidence = vision.load_evidence(self.asset["asset_id"])
+        ids = [frame["frame_id"] for frame in evidence["frames"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(outcome.frames_observed, sum(
+            1 for frame in evidence["frames"] if frame["interpretation_level"] == "observed"
+        ))
+
     def test_kill_after_two_frames_resumes_without_reinference(self) -> None:
         first_vision = self.vision(batch_size=20)
         first = self.analyze("kill_after_two", first_vision)
