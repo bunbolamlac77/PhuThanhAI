@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import os
 import fcntl
+import resource
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -168,6 +170,19 @@ def _rss_bytes(pid: int) -> int | None:
         return None
 
 
+def _reaped_children_peak_rss_bytes() -> int | None:
+    """Best available fallback after a child exits before live RSS sampling."""
+
+    try:
+        peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    except (OSError, ValueError):
+        return None
+    if peak <= 0:
+        return None
+    # macOS reports bytes; Linux and the other supported Unix targets use KiB.
+    return int(peak if sys.platform == "darwin" else peak * 1024)
+
+
 class ProcessRegistry:
     """Owns spawned children and guarantees they are reaped on shutdown."""
 
@@ -234,6 +249,9 @@ class ProcessRegistry:
             sampler.join(timeout=2)
             with self._guard:
                 self._children.pop(popen.pid, None)
+
+        if peak_rss is None:
+            peak_rss = _reaped_children_peak_rss_bytes()
 
         return Capture(
             argv=arg_list,

@@ -921,12 +921,6 @@ class LibraryService:
                     "JOB_ALREADY_RUNNING", "an analysis is already running for this asset", status=409
                 )
             store.create_job(conn, job_id=job_id, project_id=asset["project_id"], asset_id=asset_id, kind="auto_analysis")
-            store.set_analysis_state(
-                conn, asset_id, status="queued",
-                analysis_id=asset.get("analysis_id"),
-                fingerprint=asset.get("analysis_fingerprint"),
-                coverage=asset.get("analysis_coverage"),
-            )
         cancel_event = threading.Event()
         future = self._executor.submit(
             self._run_auto_job, job_id, asset_id, selection_mode, sampling_profile,

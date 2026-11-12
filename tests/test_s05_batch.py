@@ -76,10 +76,10 @@ class AutoAnalysisTests(BatchBase):
         self.assertEqual(asset["sampling_status"], "complete")
         summary = self.service.analysis_summary(asset["asset_id"])
         self.assertIn(summary["analysis_status"], {"complete", "partial"})
-        started = time.monotonic()
-        second = wait_job(self.service, self.service.start_auto_analysis(asset["asset_id"])["job_id"])
+        with mock.patch.object(self.service.vision, "analyze", wraps=self.service.vision.analyze) as analyze:
+            second = wait_job(self.service, self.service.start_auto_analysis(asset["asset_id"])["job_id"])
         self.assertEqual(second["state"], "complete")
-        self.assertLess(time.monotonic() - started, 2.0)
+        analyze.assert_not_called()
         self.assertEqual(self.service.get_asset(asset["asset_id"])["sampling_status"], "complete")
 
     def test_source_change_forces_new_sampling(self) -> None:

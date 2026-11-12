@@ -13,6 +13,7 @@ from unittest import mock
 from phuthanhai.analyzer.context_fusion import raw_evidence_digest
 from phuthanhai.analyzer.vision_service import VisionService
 from phuthanhai.config import Settings
+from phuthanhai.library.db import SCHEMA_VERSION
 from phuthanhai.library.service import LibraryService
 from tests.helpers import isolated_settings
 from tests.media_fixtures import get
@@ -89,7 +90,7 @@ class PersistenceTests(unittest.TestCase):
                 self.assertEqual(fresh_overlay["user_labels"][0]["label_vi"], "Bàn gia tiên")
                 with reopened.db.read() as conn:
                     version = conn.execute("PRAGMA user_version").fetchone()[0]
-                self.assertEqual(version, 6)
+                self.assertEqual(version, SCHEMA_VERSION)
                 self.service = reopened
             finally:
                 pass
