@@ -320,12 +320,26 @@ class BatchAnalysisService:
 
     def retry_failed(self, run_id: str) -> dict[str, Any]:
         with self.db.write() as conn:
-            conn.execute(
+            row = conn.execute(
+                "SELECT status FROM analysis_runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise store.StoreError("RUN_NOT_FOUND", "analysis run not found", status=404)
+            if row["status"] not in {"partial", "failed"}:
+                raise store.StoreError(
+                    "BATCH_NOT_TERMINAL", "failed items can only be retried from a terminal run", status=409
+                )
+            updated = conn.execute(
                 "UPDATE analysis_run_items SET status='queued', error_code=NULL, updated_at=? "
                 "WHERE run_id=? AND status='failed'",
                 (store.utc_now_iso(), run_id),
             )
-        self._update_run(run_id, status="queued")
+            if updated.rowcount == 0:
+                raise store.StoreError("BATCH_NO_FAILED_ITEMS", "run has no failed items", status=409)
+            conn.execute(
+                "UPDATE analysis_runs SET status='queued', updated_at=? WHERE run_id=?",
+                (store.utc_now_iso(), run_id),
+            )
         self._start(run_id)
         return self.get_run(run_id)
 
