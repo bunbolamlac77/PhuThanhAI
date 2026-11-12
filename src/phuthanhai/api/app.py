@@ -90,12 +90,14 @@ def create_app(
             allowed_origins=policy.allowed_origins,
         )
 
-    library = LibraryService(settings)
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings.data.ensure()
         with instance_lock(settings.data.instance_lock):
+            # Constructing LibraryService runs database migration/reconciliation.
+            # It must happen only after this process owns the data-root lock.
+            library = LibraryService(settings)
+            app.state.library = library
             session_path = settings.data.session_file
             atomic_write_json(
                 session_path,
@@ -124,6 +126,7 @@ def create_app(
                     "backend stopped",
                     extra={"fields": {"terminated_children": terminated}},
                 )
+                app.state.library = None
 
     app = FastAPI(
         title="PhuThanhAI",
@@ -135,7 +138,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.policy = policy
-    app.state.library = library
+    app.state.library = None
     app.state.pid = os.getpid()
     app.state.started_at = time.monotonic()
 
