@@ -14,13 +14,14 @@ Rules enforced here (from ``docs/00_MASTER_ARCH.md`` §7):
 from __future__ import annotations
 
 import os
+import fcntl
 import signal
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, TextIO
 
 
 class HeavySlotBusy(RuntimeError):
@@ -37,19 +38,35 @@ class WorkerReapFailed(RuntimeError):
 
 @dataclass
 class HeavySlot:
-    """Process-wide single-owner lock for AI_HEAVY work."""
+    """Machine-wide single-owner lock for AI_HEAVY work."""
 
+    lock_path: Path = field(
+        default_factory=lambda: Path("/tmp") / f"phuthanhai-ai-heavy-{os.getuid()}.lock"
+    )
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _owner: str | None = None
     _acquired_at: float | None = None
     _guard: threading.Lock = field(default_factory=threading.Lock)
+    _file_handle: TextIO | None = None
 
     def try_acquire(self, owner: str) -> bool:
         """Non-blocking acquire. Returns False when another owner holds the slot."""
 
         if not self._lock.acquire(blocking=False):
             return False
+        handle: TextIO | None = None
+        try:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = self.lock_path.open("a+")
+            os.chmod(self.lock_path, 0o600)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            if handle is not None:
+                handle.close()
+            self._lock.release()
+            return False
         with self._guard:
+            self._file_handle = handle
             self._owner = owner
             self._acquired_at = time.monotonic()
         return True
@@ -67,8 +84,15 @@ class HeavySlot:
         with self._guard:
             if owner is not None and self._owner not in (None, owner):
                 raise HeavySlotBusy(f"slot owned by {self._owner!r}, not {owner!r}")
+            handle = self._file_handle
+            self._file_handle = None
             self._owner = None
             self._acquired_at = None
+        if handle is not None:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
         try:
             self._lock.release()
         except RuntimeError as exc:  # released twice: programmer error, not user error

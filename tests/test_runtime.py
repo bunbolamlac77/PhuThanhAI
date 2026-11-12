@@ -168,7 +168,9 @@ class HeavySlotTests(unittest.TestCase):
             finally:
                 child.terminate()
                 child.wait(timeout=5)
-            self.assertTrue(HeavySlot(lock_path=lock_path).try_acquire("after-crash"))
+            recovered = HeavySlot(lock_path=lock_path)
+            self.assertTrue(recovered.try_acquire("after-crash"))
+            recovered.release("after-crash")
 
 
 class ProcessRegistryTests(unittest.TestCase):
