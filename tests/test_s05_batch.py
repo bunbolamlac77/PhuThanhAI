@@ -6,8 +6,10 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
@@ -147,6 +149,33 @@ class BatchQueueTests(BatchBase):
         reconciled = self.service.batch.get_run(run["run_id"])
         self.assertEqual(reconciled["status"], "paused")
         self.assertEqual(self.service.batch.list_items(run["run_id"])[0]["status"], "queued")
+
+    def test_concurrent_creators_cannot_claim_the_same_asset(self) -> None:
+        asset_id = self.assets[0]["asset_id"]
+        contenders = 20
+        barrier = threading.Barrier(contenders)
+
+        def aligned_busy_check(_asset_id: str) -> bool:
+            barrier.wait(timeout=10)
+            return False
+
+        def create(index: int) -> str:
+            try:
+                run = self.service.batch.create_run(
+                    self.project["project_id"], asset_ids=[asset_id], idempotency_key=f"race-{index}"
+                )
+                return run["run_id"]
+            except Exception as exc:
+                return str(getattr(exc, "code", type(exc).__name__))
+
+        with mock.patch.object(self.service.batch, "_start"), mock.patch.object(
+            self.service, "is_asset_busy", side_effect=aligned_busy_check
+        ), ThreadPoolExecutor(max_workers=contenders) as pool:
+            outcomes = list(pool.map(create, range(contenders)))
+
+        run_ids = [value for value in outcomes if value != "ASSET_ALREADY_CLAIMED"]
+        self.assertEqual(len(run_ids), 1)
+        self.assertEqual(outcomes.count("ASSET_ALREADY_CLAIMED"), contenders - 1)
 
 
 if __name__ == "__main__":
