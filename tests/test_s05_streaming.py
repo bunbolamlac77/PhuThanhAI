@@ -121,7 +121,17 @@ class StreamingProtocolTests(StreamingCase):
     def test_invalid_final_job_identity_is_rejected(self) -> None:
         outcome = self.analyze("wrong_final_job")
         self.assertIn(outcome.status, {"partial", "cancelled"})
-        self.assertLessEqual(outcome.frames_observed, outcome.frames_total)
+        self.assertEqual(outcome.frames_observed, 0)
+
+    def test_missing_stream_identity_is_rejected_before_commit(self) -> None:
+        outcome = self.analyze("missing_frame_identity")
+        self.assertIn(outcome.status, {"partial", "cancelled"})
+        self.assertEqual(outcome.frames_observed, 0)
+
+    def test_wrong_stream_analysis_id_is_rejected_before_commit(self) -> None:
+        outcome = self.analyze("wrong_frame_analysis")
+        self.assertIn(outcome.status, {"partial", "cancelled"})
+        self.assertEqual(outcome.frames_observed, 0)
 
     def test_long_line_without_newline_is_bounded(self) -> None:
         outcome = self.analyze("long_line")

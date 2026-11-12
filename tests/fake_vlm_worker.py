@@ -116,7 +116,20 @@ def main() -> int:
             "elapsed_s": 0.01,
         }
         results.append(entry)
-        emit({"type": "frame_result", "job_id": request["job_id"], **entry})
+        frame_event = {
+            "type": "frame_result",
+            "job_id": request["job_id"],
+            "asset_id": request["asset_id"],
+            "analysis_id": request["analysis_id"],
+            "sha256": frame["sha256"],
+            **entry,
+        }
+        if mode == "missing_frame_identity":
+            for key in ("asset_id", "analysis_id", "sha256", "normalized_pts_ms", "scene_id"):
+                frame_event.pop(key, None)
+        elif mode == "wrong_frame_analysis":
+            frame_event["analysis_id"] = "wrong-analysis"
+        emit(frame_event)
         if mode == "duplicate_frame" and len(results) == 1:
             emit({"type": "frame_result", "job_id": request["job_id"], **entry})
         if mode == "duplicate_seq" and len(results) == 1:

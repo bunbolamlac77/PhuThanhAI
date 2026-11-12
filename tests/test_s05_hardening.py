@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 
+from phuthanhai.analyzer.vision_service import model_identity
 from phuthanhai.library.batch_service import aggregate_run_status
 from phuthanhai.library.service import sampling_satisfies
 
@@ -53,6 +56,19 @@ class SamplingCompatibilityTests(unittest.TestCase):
         insufficient = self.manifest(profile="thorough", observed_gap=3_000, coverage="insufficient")
         self.assertFalse(sampling_satisfies("thorough", mislabeled))
         self.assertFalse(sampling_satisfies("quick", insufficient))
+
+
+class ModelIdentityTests(unittest.TestCase):
+    def test_same_size_weight_replacement_changes_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model = Path(tmp)
+            (model / "config.json").write_text("{}", encoding="utf-8")
+            weights = model / "model.safetensors"
+            weights.write_bytes(b"aaaa")
+            before = model_identity(model)
+            weights.write_bytes(b"bbbb")
+            after = model_identity(model)
+        self.assertNotEqual(before, after)
 
 
 if __name__ == "__main__":
