@@ -123,7 +123,7 @@ export default function VisionPanel({ asset, projectId, online, onCompleted, inM
         </select>
         <button
           type="button"
-          disabled={!online || busy || running || asset.sampling_status !== "complete"}
+          disabled={!online || busy || running}
           onClick={() => void start()}
         >
           Phân tích thông minh
@@ -144,12 +144,18 @@ export default function VisionPanel({ asset, projectId, online, onCompleted, inM
         {inMs != null && outMs != null && outMs > inMs ? (
           <span className="badge">In/Out {Math.round(inMs)}–{Math.round(outMs)} ms</span>
         ) : null}
-        {asset.sampling_status !== "complete" ? <span className="hint">Cần sampling trước</span> : null}
       </div>
 
       {job ? (
         <div className="vision__progress">
-          <div className="progress">
+          <div
+            className="progress"
+            role="progressbar"
+            aria-label="Tiến độ phân tích"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+          >
             <div className="progress__bar" style={{ width: `${percent}%` }} />
           </div>
           <span className="hint">

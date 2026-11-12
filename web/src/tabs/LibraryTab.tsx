@@ -76,6 +76,14 @@ export default function LibraryTab({ online, session }: Props) {
   const [formPath, setFormPath] = useState("");
   const [showForm, setShowForm] = useState(false);
 
+  const batchPartial = batch?.counts.partial ?? 0;
+  const batchDone = batch
+    ? batch.completed + batch.skipped + batch.failed + batchPartial
+    : 0;
+  const batchPercent = batch
+    ? Math.round(100 * batchDone / Math.max(1, batch.total_items))
+    : 0;
+
   const cursorRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
   const controllerRef = useRef<PlayerController | null>(null);
@@ -729,10 +737,20 @@ export default function LibraryTab({ online, session }: Props) {
               <strong>Hàng đợi phân tích</strong>
               <span className={`badge ${batch.status === "complete" ? "badge--ok" : "badge--warn"}`}>{batch.status}</span>
             </div>
-            <div className="progress"><div className="progress__bar" style={{ width: `${Math.round(100 * (batch.completed + batch.skipped + batch.failed) / Math.max(1, batch.total_items))}%` }} /></div>
+            <div
+              className="progress"
+              role="progressbar"
+              aria-label="Tiến độ batch"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={batchPercent}
+            >
+              <div className="progress__bar" style={{ width: `${batchPercent}%` }} />
+            </div>
             <span className="hint">
-              {batch.completed + batch.skipped + batch.failed}/{batch.total_items} xong · chạy {batch.running} · chờ {batch.waiting} · lỗi {batch.failed}
+              {batchDone}/{batch.total_items} xong · chạy {batch.running} · chờ {batch.waiting} · lỗi {batch.failed}
               {batch.skipped ? ` · bỏ qua ${batch.skipped}` : ""}
+              {batchPartial ? ` · partial ${batchPartial}` : ""}
             </span>
             <div className="toolbar">
               <button type="button" disabled={!["running", "queued", "waiting_for_memory"].includes(batch.status)} onClick={() => void batchAction("pause")}>Pause</button>

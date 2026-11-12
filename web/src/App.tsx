@@ -4,13 +4,15 @@ import LibraryTab from "./tabs/LibraryTab";
 import PovTab from "./tabs/PovTab";
 import PlaceholderTab from "./tabs/PlaceholderTab";
 
-const TABS = [
+const POV_ENABLED = import.meta.env.VITE_ENABLE_POV === "1";
+const ALL_TABS = [
   { id: "library", label: "Thư viện & Analyzer" },
   { id: "pov", label: "AI Video POV" },
   { id: "part3", label: "Phần 3" },
   { id: "part4", label: "Phần 4" },
 ] as const;
-type TabId = (typeof TABS)[number]["id"];
+type TabId = (typeof ALL_TABS)[number]["id"];
+const TABS = ALL_TABS.filter((entry) => entry.id !== "pov" || POV_ENABLED);
 
 type Connection =
   | { state: "connecting" }
@@ -105,7 +107,7 @@ export default function App() {
       case "library":
         return <LibraryTab online={online} health={health} session={session} />;
       case "pov":
-        return <PovTab />;
+        return POV_ENABLED ? <PovTab /> : <LibraryTab online={online} health={health} session={session} />;
       case "part3":
         return <PlaceholderTab title="Phần 3" note="Module tương lai. Chưa triển khai." />;
       case "part4":
