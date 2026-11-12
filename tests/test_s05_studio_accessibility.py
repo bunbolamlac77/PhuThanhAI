@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1] / "web" / "src" / "components"
+WEB_SRC = WEB.parent
 
 
 class InspectorTabLinkageTests(unittest.TestCase):
@@ -47,6 +48,44 @@ class AssetSelectionSemanticsTests(unittest.TestCase):
         self.assertIn('checked ? "asset-card--selected" : ""', self.source)
         self.assertIn("onToggleSelect(asset)", self.source)
         self.assertIn('aria-label={`Chọn ${asset.filename}`}', self.source)
+
+
+class OneClickAnalysisTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source = (WEB / "VisionPanel.tsx").read_text(encoding="utf-8")
+
+    def test_auto_analysis_is_available_before_sampling(self) -> None:
+        self.assertNotIn('asset.sampling_status !== "complete"', self.source)
+        self.assertNotIn("Cần sampling trước", self.source)
+
+    def test_analysis_progress_exposes_name_role_value(self) -> None:
+        self.assertIn('role="progressbar"', self.source)
+        self.assertIn('aria-label="Tiến độ phân tích"', self.source)
+        self.assertIn("aria-valuenow={percent}", self.source)
+
+
+class BatchProgressTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source = (WEB_SRC / "tabs" / "LibraryTab.tsx").read_text(encoding="utf-8")
+
+    def test_partial_items_are_counted_as_finished_execution(self) -> None:
+        self.assertIn('const batchPartial = batch?.counts.partial ?? 0', self.source)
+        self.assertIn("batchDone", self.source)
+        self.assertIn("{batchPartial ? ` · partial ${batchPartial}` : \"\"}", self.source)
+
+    def test_batch_progress_exposes_name_role_value(self) -> None:
+        self.assertIn('aria-label="Tiến độ batch"', self.source)
+        self.assertIn("aria-valuenow={batchPercent}", self.source)
+
+
+class PovGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source = (WEB_SRC / "App.tsx").read_text(encoding="utf-8")
+
+    def test_pov_is_hidden_by_default_behind_explicit_flag(self) -> None:
+        self.assertIn('const POV_ENABLED = import.meta.env.VITE_ENABLE_POV === "1"', self.source)
+        self.assertIn('entry.id !== "pov" || POV_ENABLED', self.source)
+        self.assertIn('return POV_ENABLED ? <PovTab />', self.source)
 
 
 if __name__ == "__main__":
