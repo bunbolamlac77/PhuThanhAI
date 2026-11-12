@@ -1,6 +1,6 @@
 # Codex S05 Repair Report
 
-Date: 2026-11-12  
+Date: 2026-11-12
 Scope: S05.4R.2 one-click/batch production hardening. S06/POV remains closed.
 
 ## A. Git State
