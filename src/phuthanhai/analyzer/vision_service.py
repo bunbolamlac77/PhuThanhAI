@@ -37,7 +37,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from phuthanhai.analyzer import vlm_worker
-from phuthanhai.analyzer.evidence import EvidenceError, build_evidence, validate_evidence
+from phuthanhai.analyzer.evidence import (
+    EVIDENCE_VERSION,
+    EvidenceError,
+    build_evidence,
+    validate_evidence,
+)
 from phuthanhai.analyzer.optimizer import FrameResultCache, build_selection
 from phuthanhai.analyzer.sampling_pipeline import SamplingError, SamplingPipeline
 from phuthanhai.config import (
@@ -180,7 +185,6 @@ def runtime_versions(python: Path) -> dict[str, Any]:
         )
         if completed.returncode == 0 and completed.stdout.strip():
             result.update(json.loads(completed.stdout.strip().splitlines()[-1]))
-            result["python"] = ".".join(str(v) for v in __import__("sys").version_info[:3])
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
     _RUNTIME_CACHE[key] = result
@@ -1225,12 +1229,51 @@ class VisionService:
     def load_evidence(self, asset_id: str) -> dict[str, Any] | None:
         asset = store.get_asset(self.db.connection(), asset_id)
         fingerprint = asset.get("analysis_fingerprint")
-        if not fingerprint:
+        sampling_fingerprint = asset.get("sampling_fingerprint")
+        if not fingerprint or not sampling_fingerprint:
             return None
         path = self._cache_dir(asset_id, fingerprint) / "visual_evidence.json"
         if not path.is_file():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            evidence = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(evidence, dict):
+                return None
+            manifest = self.sampling.load_manifest(asset_id, sampling_fingerprint)
+            if manifest is None:
+                return None
+            source = manifest.get("source")
+            if not isinstance(source, dict):
+                return None
+            source_sha = source.get("sha256")
+            if (
+                evidence.get("schema_version") != EVIDENCE_VERSION
+                or evidence.get("asset_id") != asset_id
+                or evidence.get("analysis_id") != asset.get("analysis_id")
+                or evidence.get("sampling_fingerprint") != sampling_fingerprint
+                or evidence.get("source_sha256") != source_sha
+            ):
+                return None
+            manifest_refs = {
+                frame["frame_id"]: frame
+                for frame in manifest.get("frames", [])
+                if isinstance(frame, dict) and isinstance(frame.get("frame_id"), str)
+            }
+            evidence_frames = evidence.get("frames")
+            if not isinstance(evidence_frames, list):
+                return None
+            frame_refs = [
+                manifest_refs[entry["frame_id"]]
+                for entry in evidence_frames
+                if isinstance(entry, dict) and entry.get("frame_id") in manifest_refs
+            ]
+            if len(frame_refs) != len(evidence_frames) or any(
+                entry.get("source_sha256") != source_sha
+                for entry in evidence_frames
+                if isinstance(entry, dict)
+            ):
+                return None
+            validate_evidence(evidence, frame_refs)
+            return evidence
+        except (EvidenceError, KeyError, OSError, TypeError, ValueError):
             return None
