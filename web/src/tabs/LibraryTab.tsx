@@ -309,11 +309,12 @@ export default function LibraryTab({ online, session }: Props) {
   const persist = useCallback(
     async (text: string, wallClock?: { time_of_day: string; precision: "time_of_day" }) => {
       const asset = activeRef.current;
-      if (!asset || !project) return;
+      if (!asset || !project) return false;
       const trimmed = text.trim();
       if (!trimmed) {
-        setSaveStatus("idle");
-        return;
+        setSaveError("Không thể lưu ghi chú trống.");
+        setSaveStatus("error");
+        return false;
       }
       setSaveStatus("saving");
       setSaveError(null);
@@ -351,10 +352,12 @@ export default function LibraryTab({ online, session }: Props) {
           ...current,
           note_count: existing ? current.note_count ?? 1 : (current.note_count ?? 0) + 1,
         }));
+        return true;
       } catch (cause) {
         const apiError = cause instanceof ApiError ? cause : null;
         setSaveError(apiError ? apiError.message : "Không lưu được ghi chú");
         setSaveStatus(apiError?.code === "ANNOTATION_CONFLICT" ? "conflict" : "error");
+        return false;
       }
     },
     [project, patchAsset],
@@ -363,12 +366,12 @@ export default function LibraryTab({ online, session }: Props) {
   const flushNow = useCallback(async () => {
     const current = draftRef.current;
     const existing = clipNoteRef.current;
-    if (statusRef.current !== "dirty") return;
+    if (statusRef.current !== "dirty") return true;
     if (current.trim() === (existing?.text ?? "")) {
       setSaveStatus(existing ? "saved" : "idle");
-      return;
+      return true;
     }
-    await persist(current);
+    return await persist(current);
   }, [persist]);
 
   // Autosave 450 ms after typing stops.
@@ -420,7 +423,8 @@ export default function LibraryTab({ online, session }: Props) {
       // Persist the outgoing clip first, then clear the editor synchronously.
       // Without this clear, the previous draft would briefly belong to the new
       // asset and autosave could write clip A's note onto clip B.
-      await flushNow();
+      const saved = await flushNow();
+      if (!saved) return;
       resetNoteState();
       setActiveAsset(asset);
       setInMs(null);
