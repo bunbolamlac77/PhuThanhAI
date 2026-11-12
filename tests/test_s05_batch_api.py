@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -34,6 +35,15 @@ class BatchApiTests(unittest.TestCase):
             create_app(self.settings, port=PORT, capability=CAP), base_url=f"http://127.0.0.1:{PORT}"
         )
         self.client.__enter__()
+        model = Path(self._tmp.name) / "model"
+        model.mkdir()
+        (model / "config.json").write_text("{}", encoding="utf-8")
+        (model / "model.safetensors").write_bytes(b"stub")
+        vision = self.client.app.state.library.vision
+        vision.runtime_python = Path(sys.executable)
+        vision.worker_module = "tests.fake_vlm_worker"
+        vision.model_path = model
+        vision.require_governor = False
         project = self.client.post(
             "/api/v1/projects", json={"name": "batch-api", "root_path": str(footage)}, headers=HEADERS
         ).json()

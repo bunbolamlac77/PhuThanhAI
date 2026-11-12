@@ -375,6 +375,16 @@ class BatchAnalysisService:
         run["waiting"] = counts.get("queued", 0)
         return run
 
+    def list_runs(self, project_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        self.service.get_project(project_id)
+        with self.db.read() as conn:
+            rows = conn.execute(
+                "SELECT run_id FROM analysis_runs WHERE project_id=? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (project_id, max(1, min(int(limit), 100))),
+            ).fetchall()
+        return [self.get_run(str(row["run_id"])) for row in rows]
+
     def list_items(self, run_id: str) -> list[dict[str, Any]]:
         self.get_run(run_id)
         with self.db.read() as conn:

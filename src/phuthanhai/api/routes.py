@@ -388,6 +388,16 @@ def create_analysis_run(project_id: str, payload: AnalysisRunCreate, request: Re
     )
 
 
+@router.get("/projects/{project_id}/analysis-runs", response_model=list[AnalysisRunOut])
+def list_analysis_runs(
+    project_id: str, request: Request, limit: int = Query(default=20, ge=1, le=100)
+) -> list[AnalysisRunOut]:
+    return [
+        AnalysisRunOut.model_validate(run)
+        for run in _library(request).batch.list_runs(project_id, limit=limit)
+    ]
+
+
 @router.get("/analysis-runs/{run_id}", response_model=AnalysisRunOut)
 def get_analysis_run(run_id: str, request: Request) -> AnalysisRunOut:
     return AnalysisRunOut.model_validate(_library(request).batch.get_run(run_id))

@@ -15,6 +15,7 @@ import {
   scanProject,
   createAnalysisRun,
   getAnalysisRun,
+  listAnalysisRuns,
   pauseAnalysisRun,
   resumeAnalysisRun,
   cancelAnalysisRun,
@@ -164,6 +165,26 @@ export default function LibraryTab({ online, session }: Props) {
     void loadPage(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.project_id, query, sort, favoriteOnly, hasNoteOnly, minRating, tagFilter]);
+
+  useEffect(() => {
+    if (!project) {
+      setBatch(null);
+      return;
+    }
+    let cancelled = false;
+    void listAnalysisRuns(project.project_id, 1)
+      .then((runs) => {
+        if (!cancelled) setBatch(runs[0] ?? null);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setBatchError(cause instanceof Error ? cause.message : "Không phục hồi được hàng đợi");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.project_id]);
 
   const loadMore = useCallback(() => {
     if (cursorRef.current && !loadingRef.current) void loadPage(false);

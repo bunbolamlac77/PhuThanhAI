@@ -516,6 +516,10 @@ export function getAnalysisRun(runId: string): Promise<AnalysisRun> {
   return request<AnalysisRun>(`/analysis-runs/${runId}`);
 }
 
+export function listAnalysisRuns(projectId: string, limit = 20): Promise<AnalysisRun[]> {
+  return request<AnalysisRun[]>(`/projects/${projectId}/analysis-runs?limit=${limit}`);
+}
+
 export function listAnalysisRunItems(runId: string): Promise<AnalysisRunItem[]> {
   return request<AnalysisRunItem[]>(`/analysis-runs/${runId}/items`);
 }
