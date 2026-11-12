@@ -177,6 +177,34 @@ class BatchQueueTests(BatchBase):
         self.assertEqual(len(run_ids), 1)
         self.assertEqual(outcomes.count("ASSET_ALREADY_CLAIMED"), contenders - 1)
 
+    def test_retry_is_rejected_while_run_is_active(self) -> None:
+        with mock.patch.object(self.service.batch, "_start"):
+            run = self.service.batch.create_run(
+                self.project["project_id"], asset_ids=[self.assets[0]["asset_id"]]
+            )
+            with self.assertRaises(Exception) as ctx:
+                self.service.batch.retry_failed(run["run_id"])
+        self.assertEqual(getattr(ctx.exception, "code", None), "BATCH_NOT_TERMINAL")
+
+    def test_cancel_fences_stale_worker_completion(self) -> None:
+        with mock.patch.object(self.service.batch, "_start"):
+            run = self.service.batch.create_run(
+                self.project["project_id"], asset_ids=[self.assets[0]["asset_id"]]
+            )
+        item = self.service.batch.list_items(run["run_id"])[0]
+        with self.service.db.write() as conn:
+            conn.execute("UPDATE analysis_runs SET status='running' WHERE run_id=?", (run["run_id"],))
+            conn.execute("UPDATE analysis_run_items SET status='running' WHERE item_id=?", (item["item_id"],))
+        self.service.batch.cancel(run["run_id"])
+        self.service.batch._update_run(run["run_id"], status="complete")
+        with self.service.db.write() as conn:
+            conn.execute(
+                "UPDATE analysis_run_items SET status='complete' WHERE item_id=? AND status='running'",
+                (item["item_id"],),
+            )
+        self.assertEqual(self.service.batch.get_run(run["run_id"])["status"], "cancelled")
+        self.assertEqual(self.service.batch.list_items(run["run_id"])[0]["status"], "cancelled")
+
 
 if __name__ == "__main__":
     unittest.main()
