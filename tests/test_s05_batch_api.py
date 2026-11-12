@@ -78,6 +78,11 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 202, created.text)
         run = created.json()
         self.assertEqual(run["total_items"], 2)
+        recovered = self.client.get(
+            f"/api/v1/projects/{self.project_id}/analysis-runs", headers=HEADERS
+        )
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        self.assertEqual(recovered.json()[0]["run_id"], run["run_id"])
         items = self.client.get(f"/api/v1/analysis-runs/{run['run_id']}/items", headers=HEADERS)
         self.assertEqual(items.status_code, 200)
         self.assertEqual(len(items.json()), 2)

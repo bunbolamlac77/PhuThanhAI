@@ -77,6 +77,12 @@ class BatchProgressTests(unittest.TestCase):
         self.assertIn('aria-label="Tiến độ batch"', self.source)
         self.assertIn("aria-valuenow={batchPercent}", self.source)
 
+    def test_project_change_recovers_latest_persistent_batch(self) -> None:
+        api = (WEB_SRC / "api.ts").read_text(encoding="utf-8")
+        self.assertIn("export function listAnalysisRuns", api)
+        self.assertIn("listAnalysisRuns(project.project_id", self.source)
+        self.assertIn("setBatch(runs[0] ?? null)", self.source)
+
 
 class PovGateTests(unittest.TestCase):
     def setUp(self) -> None:
