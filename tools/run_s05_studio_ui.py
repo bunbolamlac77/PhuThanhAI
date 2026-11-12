@@ -95,6 +95,10 @@ def main() -> int:
             if session.evaluate("!!document.querySelector('.studio-workspace')"):
                 break
             time.sleep(0.25)
+        for _ in range(60):
+            if session.evaluate("document.querySelectorAll('.asset-card').length") > 0:
+                break
+            time.sleep(0.25)
         result["workspace_present"] = bool(session.evaluate("!!document.querySelector('.studio-workspace')"))
         result["grid_columns"] = session.evaluate(
             "getComputedStyle(document.querySelector('.studio-workspace')).gridTemplateColumns")
@@ -124,6 +128,13 @@ def main() -> int:
         result["video_present"] = bool(session.evaluate("!!document.querySelector('video')"))
         result["selection_modes"] = session.evaluate("""
           [...document.querySelectorAll('select[aria-label="Chế độ chọn frame"] option')].map(o => o.value)
+        """)
+        result["one_click"] = session.evaluate("""
+          [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Phân tích thông minh')
+        """)
+        result["batch_buttons"] = session.evaluate("""
+          ['Phân tích đã chọn', 'Phân tích cả dự án'].every(t =>
+            [...document.querySelectorAll('button')].some(b => b.textContent.trim().startsWith(t)))
         """)
         result["active_option"] = session.evaluate("""
           (() => {
@@ -206,6 +217,7 @@ def main() -> int:
             and result["after_checkbox"] == {"current": "true", "selected": "true", "checked": True}
             and result["checkbox_did_not_change_active"]
             and result["selection_modes"] == ["smart", "balanced", "full"]
+            and result["one_click"] and result["batch_buttons"]
             and result["video_present"] and result["draft_preserved"]
             and result["space_on_tab_ignored"] and result["thumbnail_fallbacks"] > 0
             and "Không có ảnh" in result["fallback_text"]

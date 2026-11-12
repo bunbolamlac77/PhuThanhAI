@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -221,7 +221,50 @@ def _migration_v5(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4, _migration_v5)
+def _migration_v6(conn: sqlite3.Connection) -> None:
+    """S05.4R.2: persistent one-click/batch analysis runs."""
+
+    _run_script(conn, """
+CREATE TABLE IF NOT EXISTS analysis_runs (
+  run_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  idempotency_key TEXT,
+  total_items INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_runs_idempotency
+  ON analysis_runs(project_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_analysis_runs_project ON analysis_runs(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS analysis_run_items (
+  item_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  sampling_status TEXT,
+  vision_status TEXT,
+  cache_reused INTEGER NOT NULL DEFAULT 0,
+  frames_selected INTEGER NOT NULL DEFAULT 0,
+  frames_committed INTEGER NOT NULL DEFAULT 0,
+  error_code TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  UNIQUE(run_id, asset_id),
+  FOREIGN KEY(run_id) REFERENCES analysis_runs(run_id) ON DELETE CASCADE,
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_analysis_run_items_order ON analysis_run_items(run_id, position);
+CREATE INDEX IF NOT EXISTS idx_analysis_run_items_active ON analysis_run_items(asset_id, status);
+""")
+
+
+MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4, _migration_v5, _migration_v6)
 
 
 class MigrationError(RuntimeError):

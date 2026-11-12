@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AnalysisMethod, AnalysisSummary, Asset, SamplingJob, SelectionMode } from "../api";
-import { cancelJob, fetchAnalysis, getJob, startAnalysis } from "../api";
+import { cancelJob, fetchAnalysis, getJob, startAutoAnalysis } from "../api";
 import ContextPanel from "./ContextPanel";
 
 interface Props {
@@ -63,10 +63,8 @@ export default function VisionPanel({ asset, projectId, online, onCompleted, inM
     setBusy(true);
     setError(null);
     setStartedAt(Date.now());
-    const ranges: Array<[number, number]> = [];
-    if (inMs != null && outMs != null && outMs > inMs) ranges.push([inMs, outMs]);
     try {
-      setJob(await startAnalysis(asset.asset_id, method, modeOverride ?? selectionMode, ranges));
+      setJob(await startAutoAnalysis(asset.asset_id, modeOverride ?? selectionMode));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không bắt đầu được phân tích");
     } finally {
@@ -99,6 +97,9 @@ export default function VisionPanel({ asset, projectId, online, onCompleted, inM
         </span>
       </div>
 
+      <div className="vision__steps" aria-label="Các bước phân tích">
+        <span>Chuẩn bị video</span><span>→</span><span>Chọn frame</span><span>→</span><span>Qwen3-VL</span><span>→</span><span>Hoàn thành</span>
+      </div>
       <div className="vision__controls">
         <select
           value={selectionMode}
@@ -125,7 +126,7 @@ export default function VisionPanel({ asset, projectId, online, onCompleted, inM
           disabled={!online || busy || running || asset.sampling_status !== "complete"}
           onClick={() => void start()}
         >
-          Phân tích
+          Phân tích thông minh
         </button>
         {running ? (
           <button type="button" onClick={() => void cancel()}>

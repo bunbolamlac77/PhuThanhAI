@@ -262,6 +262,58 @@ class SamplingSummary(BaseModel):
     manifest: dict[str, Any] | None = None
 
 
+class AnalysisRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_ids: list[str] | None = None
+    selection_mode: Literal["smart", "balanced", "full"] = "smart"
+    sampling_profile: Literal["quick", "detailed", "thorough"] = "detailed"
+    skip_existing: bool = True
+    idempotency_key: str | None = None
+
+
+class AnalysisRunItemOut(BaseModel):
+    item_id: str
+    run_id: str
+    asset_id: str
+    position: int
+    status: str
+    sampling_status: str | None = None
+    vision_status: str | None = None
+    cache_reused: int = 0
+    frames_selected: int = 0
+    frames_committed: int = 0
+    error_code: str | None = None
+    retry_count: int = 0
+    updated_at: str
+
+
+class AnalysisRunOut(BaseModel):
+    run_id: str
+    project_id: str
+    status: str
+    config: dict[str, Any]
+    total_items: int
+    counts: dict[str, int]
+    completed: int
+    skipped: int
+    failed: int
+    running: int
+    waiting: int
+    created_at: str
+    updated_at: str
+
+
+class AnalyzeAutoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selection_mode: Literal["smart", "balanced", "full"] = "smart"
+    sampling_profile: Literal["quick", "detailed", "thorough"] = "detailed"
+    skip_existing: bool = True
+    method: Literal["auto", "single_frame", "sequential_frames", "multi_frame"] = "auto"
+    user_ranges: list[list[int]] | None = None
+
+
 class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

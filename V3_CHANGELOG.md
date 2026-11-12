@@ -79,3 +79,14 @@ V3 là **đặc tả kiến trúc tối ưu hơn V2**, không phải tuyên bố
   1.4-3.5 GB, MLX 3.8-4.2 GB, swap delta 0; quality NOT VERIFIED.
 - Persistent worker still not implemented. GATE FAIL; G5 NOT VERIFIED.
 
+## S05.4R.2 addendum — One-click & batch
+
+- Added auto analysis job/endpoint: source verify, sampling reuse/auto-run,
+  Smart/Balanced/Full inference, existing-result skip.
+- Added persistent batch run/item tables (migration v6), one-heavy-worker
+  orchestrator, pause/resume/cancel and crash reconciliation.
+- Studio Library batch buttons/queue panel; Inspector primary "Phân tích thông minh".
+- Tests include 3 selected clips, entire-project 54-ID snapshot, pause/resume,
+  cancel, restart reconciliation and API contracts.
+- Parent gate still FAIL (persistent worker/quality/endurance). G5 NOT VERIFIED.
+

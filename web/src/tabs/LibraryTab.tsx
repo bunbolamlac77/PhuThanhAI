@@ -13,6 +13,12 @@ import {
   putReview,
   recordAnnotationUpdateKeepalive,
   scanProject,
+  createAnalysisRun,
+  getAnalysisRun,
+  pauseAnalysisRun,
+  resumeAnalysisRun,
+  cancelAnalysisRun,
+  retryFailedAnalysisRun,
   updateAnnotation,
 } from "../api";
 import AssetGrid from "../components/AssetGrid";
@@ -51,6 +57,8 @@ export default function LibraryTab({ online, session }: Props) {
   const [activeAsset, setActiveAsset] = useState<Asset | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [batch, setBatch] = useState<import("../api").AnalysisRun | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   const [projectNotes, setProjectNotes] = useState<Annotation[]>([]);
   const [clipNote, setClipNote] = useState<Annotation | null>(null);
@@ -152,6 +160,70 @@ export default function LibraryTab({ online, session }: Props) {
   const loadMore = useCallback(() => {
     if (cursorRef.current && !loadingRef.current) void loadPage(false);
   }, [loadPage]);
+
+  useEffect(() => {
+    if (!batch || !["queued", "running", "paused", "waiting_for_memory"].includes(batch.status)) return;
+    const timer = setInterval(async () => {
+      try {
+        setBatch(await getAnalysisRun(batch.run_id));
+      } catch (cause) {
+        setBatchError(cause instanceof Error ? cause.message : "Không đọc được hàng đợi");
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [batch?.run_id, batch?.status]);
+
+  async function startBatch(scope: "selected" | "project") {
+    if (!project || !online) return;
+    const count = scope === "selected" ? selected.size : total;
+    if (count === 0) {
+      setBatchError(scope === "selected" ? "Chưa chọn clip nào." : "Dự án không có clip.");
+      return;
+    }
+    const completed = assets.filter((asset) => asset.analysis_status === "complete").length;
+    const message = [
+      `Phân tích ${count} clip · ${scope === "selected" ? "clip đã chọn" : "toàn dự án"}.`,
+      "Chế độ: Smart · Sampling: Detailed · bỏ qua kết quả hợp lệ.",
+      scope === "selected"
+        ? `Đã hoàn thành: ${completed}. Clip cần xử lý: ${Math.max(0, count - completed)}.`
+        : "Kết quả hợp lệ sẽ được backend kiểm tra và bỏ qua cho từng clip.",
+      "Chỉ một worker nặng; có thể pause/resume/cancel. Tiếp tục?",
+    ].join("\n");
+    if (!window.confirm(message)) return;
+    setBatchError(null);
+    try {
+      setBatch(await createAnalysisRun(
+        project.project_id,
+        scope === "selected" ? [...selected] : null,
+        "smart",
+        "detailed",
+        `${project.project_id}:${scope}:${Date.now()}`,
+      ));
+    } catch (cause) {
+      setBatchError(cause instanceof Error ? cause.message : "Không tạo được hàng đợi");
+    }
+  }
+
+  async function retryFailed() {
+    if (!batch) return;
+    try {
+      setBatch(await retryFailedAnalysisRun(batch.run_id));
+    } catch (cause) {
+      setBatchError(cause instanceof Error ? cause.message : "Không retry được clip lỗi");
+    }
+  }
+
+  async function batchAction(action: "pause" | "resume" | "cancel") {
+    if (!batch) return;
+    try {
+      const next = action === "pause" ? await pauseAnalysisRun(batch.run_id)
+        : action === "resume" ? await resumeAnalysisRun(batch.run_id)
+        : await cancelAnalysisRun(batch.run_id);
+      setBatch(next);
+    } catch (cause) {
+      setBatchError(cause instanceof Error ? cause.message : "Thao tác hàng đợi thất bại");
+    }
+  }
 
   // Project-scope notes.
   const reloadProjectNotes = useCallback(async () => {
@@ -642,7 +714,34 @@ export default function LibraryTab({ online, session }: Props) {
           >
             Bỏ chọn
           </button>
+          <button type="button" disabled={!online || selected.size === 0} onClick={() => void startBatch("selected")}>
+            Phân tích đã chọn ({selected.size})
+          </button>
+          <button type="button" disabled={!online || !project || total === 0} onClick={() => void startBatch("project")}>
+            Phân tích cả dự án
+          </button>
         </div>
+
+        {batchError ? <p className="result result--bad">{batchError}</p> : null}
+        {batch ? (
+          <div className="batch-queue" aria-label="Tiến độ hàng đợi">
+            <div className="batch-queue__head">
+              <strong>Hàng đợi phân tích</strong>
+              <span className={`badge ${batch.status === "complete" ? "badge--ok" : "badge--warn"}`}>{batch.status}</span>
+            </div>
+            <div className="progress"><div className="progress__bar" style={{ width: `${Math.round(100 * (batch.completed + batch.skipped + batch.failed) / Math.max(1, batch.total_items))}%` }} /></div>
+            <span className="hint">
+              {batch.completed + batch.skipped + batch.failed}/{batch.total_items} xong · chạy {batch.running} · chờ {batch.waiting} · lỗi {batch.failed}
+              {batch.skipped ? ` · bỏ qua ${batch.skipped}` : ""}
+            </span>
+            <div className="toolbar">
+              <button type="button" disabled={!["running", "queued", "waiting_for_memory"].includes(batch.status)} onClick={() => void batchAction("pause")}>Pause</button>
+              <button type="button" disabled={!["paused", "waiting_for_memory"].includes(batch.status)} onClick={() => void batchAction("resume")}>Resume</button>
+              <button type="button" disabled={batch.failed === 0} onClick={() => void retryFailed()}>Retry lỗi</button>
+              <button type="button" disabled={["complete", "partial", "cancelled", "failed"].includes(batch.status)} onClick={() => void batchAction("cancel")}>Cancel</button>
+            </div>
+          </div>
+        ) : null}
 
         {showForm ? (
           <div className="project-form">

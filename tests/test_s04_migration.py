@@ -89,7 +89,7 @@ class PersistenceTests(unittest.TestCase):
                 self.assertEqual(fresh_overlay["user_labels"][0]["label_vi"], "Bàn gia tiên")
                 with reopened.db.read() as conn:
                     version = conn.execute("PRAGMA user_version").fetchone()[0]
-                self.assertEqual(version, 5)
+                self.assertEqual(version, 6)
                 self.service = reopened
             finally:
                 pass

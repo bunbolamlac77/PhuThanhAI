@@ -87,6 +87,38 @@ export interface Asset {
   note_count?: number;
 }
 
+export interface AnalysisRun {
+  run_id: string;
+  project_id: string;
+  status: string;
+  config: { selection_mode: SelectionMode; sampling_profile: string; skip_existing: boolean };
+  total_items: number;
+  counts: Record<string, number>;
+  completed: number;
+  skipped: number;
+  failed: number;
+  running: number;
+  waiting: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnalysisRunItem {
+  item_id: string;
+  run_id: string;
+  asset_id: string;
+  position: number;
+  status: string;
+  sampling_status: string | null;
+  vision_status: string | null;
+  cache_reused: number;
+  frames_selected: number;
+  frames_committed: number;
+  error_code: string | null;
+  retry_count: number;
+  updated_at: string;
+}
+
 export interface AssetPage {
   items: Asset[];
   next_cursor: string | null;
@@ -462,6 +494,59 @@ export interface AnalysisSummary {
       uncertainty: string[];
     }>;
   } | null;
+}
+
+export function createAnalysisRun(
+  projectId: string,
+  assetIds: string[] | null,
+  selectionMode: SelectionMode = "smart",
+  samplingProfile: "quick" | "detailed" | "thorough" = "detailed",
+  idempotencyKey?: string,
+): Promise<AnalysisRun> {
+  return mutate<AnalysisRun>(`/projects/${projectId}/analysis-runs`, "POST", {
+    asset_ids: assetIds,
+    selection_mode: selectionMode,
+    sampling_profile: samplingProfile,
+    skip_existing: true,
+    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+  });
+}
+
+export function getAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return request<AnalysisRun>(`/analysis-runs/${runId}`);
+}
+
+export function listAnalysisRunItems(runId: string): Promise<AnalysisRunItem[]> {
+  return request<AnalysisRunItem[]>(`/analysis-runs/${runId}/items`);
+}
+
+export function pauseAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return mutate<AnalysisRun>(`/analysis-runs/${runId}:pause`, "POST");
+}
+
+export function resumeAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return mutate<AnalysisRun>(`/analysis-runs/${runId}:resume`, "POST");
+}
+
+export function retryFailedAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return mutate<AnalysisRun>(`/analysis-runs/${runId}:retry-failed`, "POST");
+}
+
+export function cancelAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return mutate<AnalysisRun>(`/analysis-runs/${runId}:cancel`, "POST");
+}
+
+export function startAutoAnalysis(
+  assetId: string,
+  selectionMode: SelectionMode = "smart",
+  samplingProfile: "quick" | "detailed" | "thorough" = "detailed",
+  skipExisting = true,
+): Promise<SamplingJob> {
+  return mutate<SamplingJob>(`/assets/${assetId}:analyze-auto`, "POST", {
+    selection_mode: selectionMode,
+    sampling_profile: samplingProfile,
+    skip_existing: skipExisting,
+  });
 }
 
 export function startAnalysis(

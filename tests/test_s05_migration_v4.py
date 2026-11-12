@@ -77,8 +77,8 @@ class RealMigrationTests(unittest.TestCase):
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 4)
 
         database = Database(self.path)
-        self.assertEqual(database.migrate(), 5)
-        self.assertEqual(database.migrate(), 5)  # idempotent
+        self.assertEqual(database.migrate(), 6)
+        self.assertEqual(database.migrate(), 6)  # idempotent
         with database.read() as conn:
             project = conn.execute("SELECT * FROM projects WHERE project_id=?", (ids["project_id"],)).fetchone()
             note = conn.execute("SELECT * FROM annotations WHERE annotation_id=?", (ids["annotation_id"],)).fetchone()

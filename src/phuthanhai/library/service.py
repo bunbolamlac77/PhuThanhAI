@@ -53,12 +53,15 @@ class LibraryService:
         )
         self.pipeline = SamplingPipeline(self.db, settings.data.sampling)
         self.vision = VisionService(self.db, settings)
+        from phuthanhai.library.batch_service import BatchAnalysisService
+        self.batch = BatchAnalysisService(self)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sampling")
         self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
 
     # -- lifecycle --------------------------------------------------------- #
     def close(self) -> None:
+        self.batch.close()
         self._executor.shutdown(wait=False, cancel_futures=True)
         self.preview.shutdown()
         self.db.close_current_thread()
@@ -769,6 +772,173 @@ class LibraryService:
             raise store.StoreError("REPORT_NOT_FOUND", "report has not been built", status=404)
         return path.read_bytes(), allowed[name]
 
+    # -- one-click analysis ------------------------------------------------ #
+    def is_asset_busy(self, asset_id: str) -> bool:
+        with self._jobs_lock:
+            return any(
+                handle["asset_id"] == asset_id and not handle["future"].done()
+                for handle in self._jobs.values()
+            )
+
+    def _sampling_is_valid(self, asset: dict[str, Any], path: Path, profile: str) -> bool:
+        fingerprint = asset.get("sampling_fingerprint")
+        if asset.get("sampling_status") != "complete" or not fingerprint:
+            return False
+        manifest = self.pipeline.load_manifest(asset["asset_id"], fingerprint)
+        if not manifest:
+            return False
+        if manifest.get("source", {}).get("sha256") != sha256_file(path):
+            return False
+        # Reuse any verified manifest for this source; only a new/missing cache
+        # is sampled with the requested profile.
+        return manifest.get("settings", {}).get("max_edge") is not None
+
+    def auto_analyze_sync(
+        self,
+        asset_id: str,
+        *,
+        selection_mode: str = "smart",
+        sampling_profile: str = "detailed",
+        skip_existing: bool = True,
+        method: str = "auto",
+        user_ranges: list[list[int]] | None = None,
+        progress: Any = None,
+        cancel: threading.Event | None = None,
+        job_id: str | None = None,
+    ) -> dict[str, Any]:
+        """One-click pipeline: verify -> sample if needed -> infer -> reuse cache."""
+        if selection_mode not in {"smart", "balanced", "full"}:
+            raise store.StoreError("SELECTION_MODE_INVALID", f"unknown selection mode: {selection_mode}")
+        if sampling_profile not in {"quick", "detailed", "thorough"}:
+            raise store.StoreError("SAMPLING_PROFILE_INVALID", f"unknown sampling profile: {sampling_profile}")
+        asset, path = self.resolve_asset_file(asset_id)
+        source_sha = sha256_file(path)
+
+        if skip_existing and asset.get("analysis_status") == "complete":
+            evidence = self.vision.load_evidence(asset_id) or {}
+            coverage = evidence.get("visual_coverage") or {}
+            if (evidence.get("source_sha256") == source_sha
+                    and coverage.get("mode") == selection_mode):
+                return {
+                    "asset_id": asset_id, "skipped": True,
+                    "reason": "valid_analysis_exists", "status": "complete",
+                    "frames_observed": len(evidence.get("frames") or []),
+                }
+
+        sampling_reused = self._sampling_is_valid(asset, path, sampling_profile)
+        if not sampling_reused:
+            def sampling_progress(payload: dict[str, Any]) -> None:
+                if progress is not None:
+                    progress({**payload, "stage": f"sampling:{payload.get('stage', 'running')}",
+                             "fraction": 0.45 * float(payload.get("fraction", 0))})
+            outcome = self.pipeline.run(
+                asset, path, profile=sampling_profile,
+                progress=sampling_progress, cancel=cancel,
+            )
+            if outcome.status != "complete":
+                raise store.StoreError("SAMPLING_FAILED", "sampling did not complete")
+            asset = self.get_asset(asset_id)
+        else:
+            if progress is not None:
+                progress({"stage": "sampling:cached", "fraction": 0.45, "done": 1, "total": 1})
+
+        def vision_progress(payload: dict[str, Any]) -> None:
+            if progress is not None:
+                progress({**payload, "fraction": 0.45 + 0.55 * float(payload.get("fraction", 0))})
+
+        outcome = self.vision.analyze(
+            asset, path, method=method, selection_mode=selection_mode,
+            user_ranges=user_ranges, progress=vision_progress,
+            cancel=cancel, job_id=job_id,
+        )
+        return {
+            "asset_id": asset_id, "skipped": False, "sampling_reused": sampling_reused,
+            **outcome.to_dict(),
+        }
+
+    def start_auto_analysis(
+        self,
+        asset_id: str,
+        *,
+        selection_mode: str = "smart",
+        sampling_profile: str = "detailed",
+        skip_existing: bool = True,
+        method: str = "auto",
+        user_ranges: list[list[int]] | None = None,
+    ) -> dict[str, Any]:
+        if selection_mode not in {"smart", "balanced", "full"}:
+            raise store.StoreError("SELECTION_MODE_INVALID", f"unknown selection mode: {selection_mode}")
+        if sampling_profile not in {"quick", "detailed", "thorough"}:
+            raise store.StoreError("SAMPLING_PROFILE_INVALID", f"unknown sampling profile: {sampling_profile}")
+        asset, _path = self.resolve_asset_file(asset_id)
+        if self.is_asset_busy(asset_id):
+            raise store.StoreError("JOB_ALREADY_RUNNING", "an analysis is already running for this asset", status=409)
+        if self.batch.is_asset_active(asset_id):
+            raise store.StoreError("ASSET_ALREADY_CLAIMED", "asset is queued in a batch analysis", status=409)
+        job_id = str(uuid.uuid4())
+        with self.db.write() as conn:
+            store.create_job(conn, job_id=job_id, project_id=asset["project_id"], asset_id=asset_id, kind="auto_analysis")
+            store.set_analysis_state(
+                conn, asset_id, status="queued",
+                analysis_id=asset.get("analysis_id"),
+                fingerprint=asset.get("analysis_fingerprint"),
+                coverage=asset.get("analysis_coverage"),
+            )
+        cancel_event = threading.Event()
+        future = self._executor.submit(
+            self._run_auto_job, job_id, asset_id, selection_mode, sampling_profile,
+            skip_existing, method, user_ranges, cancel_event,
+        )
+        with self._jobs_lock:
+            self._jobs[job_id] = {
+                "asset_id": asset_id, "kind": "auto_analysis",
+                "selection_mode": selection_mode, "future": future,
+                "cancel": cancel_event, "started": time.monotonic(),
+            }
+        return self.get_job(job_id)
+
+    def _run_auto_job(
+        self, job_id: str, asset_id: str, selection_mode: str,
+        sampling_profile: str, skip_existing: bool, method: str,
+        user_ranges: list[list[int]] | None, cancel: threading.Event,
+    ) -> None:
+        last_update = 0.0
+
+        def progress(payload: dict[str, Any]) -> None:
+            nonlocal last_update
+            now = time.monotonic()
+            if now - last_update < 0.5 and payload.get("fraction", 0) < 1:
+                return
+            last_update = now
+            try:
+                with self.db.write() as conn:
+                    store.update_job(conn, job_id, state="running",
+                                     progress=round(0.02 + 0.96 * float(payload.get("fraction", 0)), 3))
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="running", progress=0.02)
+            result = self.auto_analyze_sync(
+                asset_id, selection_mode=selection_mode, sampling_profile=sampling_profile,
+                skip_existing=skip_existing, method=method, user_ranges=user_ranges,
+                progress=progress, cancel=cancel, job_id=job_id,
+            )
+            with self.db.write() as conn:
+                state = "cancelled" if cancel.is_set() else "complete"
+                store.update_job(conn, job_id, state=state, progress=1.0)
+        except VisionError as exc:
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="failed", error_code=exc.code)
+        except Exception as exc:  # noqa: BLE001
+            code = getattr(exc, "code", "ANALYSIS_FAILED")
+            with self.db.write() as conn:
+                store.update_job(conn, job_id, state="failed", error_code=str(code))
+        finally:
+            with self._jobs_lock:
+                self._jobs.pop(job_id, None)
+
     # -- visual analysis --------------------------------------------------- #
     def start_analysis(
         self,
@@ -790,6 +960,8 @@ class LibraryService:
                     raise store.StoreError(
                         "JOB_ALREADY_RUNNING", "a job is already running for this asset", status=409
                     )
+        if self.batch.is_asset_active(asset_id):
+            raise store.StoreError("ASSET_ALREADY_CLAIMED", "asset is queued in a batch analysis", status=409)
         job_id = str(uuid.uuid4())
         with self.db.write() as conn:
             store.create_job(conn, job_id=job_id, project_id=asset["project_id"], asset_id=asset_id, kind="visual_analysis")

@@ -10,7 +10,7 @@ interface Props {
 
 const PROFILES: Array<{ id: SamplingProfile; label: string; gap: string }> = [
   { id: "quick", label: "Quick", gap: "~12 s" },
-  { id: "detailed", label: "Detailed", gap: "~6 s" },
+  { id: "detailed", label: "Detailed · lấy mẫu khoảng 6 giây/frame", gap: "~6 s" },
   { id: "thorough", label: "Thorough", gap: "~3 s" },
 ];
 
@@ -85,7 +85,7 @@ export default function SamplingPanel({ asset, online, onCompleted }: Props) {
   return (
     <div className="sampling">
       <div className="sampling__head">
-        <strong>Tiền xử lý S02</strong>
+        <strong>Tiền xử lý S02 (nâng cao)</strong>
         <span className={`badge ${summary?.sampling_status === "complete" ? "badge--ok" : ""}`}>
           {summary?.sampling_status ?? asset.sampling_status ?? "not_sampled"}
         </span>

@@ -355,3 +355,24 @@ implemented/measured. G5 remains **NOT VERIFIED**.
 
 **GATE: FAIL.** Streaming durability is fixed; adaptive and persistent-worker
 acceptance plus labelled quality remain. G5 remains **NOT VERIFIED**.
+
+## S05.4R.2 addendum — One-click & batch (PARTIAL)
+
+- [x] Auto endpoint/job: verify source, reuse valid sampling, auto-sample, infer,
+      skip existing valid results; one primary UI button.
+- [x] Persistent analysis_runs/items migration v6 with snapshot asset IDs,
+      idempotency key, per-item status/counts/cache/error.
+- [x] One-heavy-worker batch loop; pause/resume/cancel, retry failed,
+      waiting_for_memory stop, restart reconciliation, no auto-complete after crash.
+- [x] Selected and entire-project snapshot tests; 54-asset snapshot test.
+- [x] API endpoints for auto, create/get/items/pause/resume/cancel.
+- [x] Studio queue bar and one-click primary button; Studio E2E passes.
+- [x] Source-change test forces a new sampling fingerprint; existing-result skip tested.
+- [ ] Full real-model 54-clip batch (fake-worker queue tests used by policy).
+- [ ] Persistent worker A/B, human-labelled quality, endurance (still open).
+- [ ] Batch UI ETA/count accuracy beyond loaded page (server counts used for scope;
+      completed estimate is omitted for project-wide confirmation).
+
+**GATE: FAIL.** Addendum workflow is implemented and tested, but the parent
+S05.4R.2 gate still has persistent-worker/quality/endurance gaps. G5 NOT VERIFIED.
+

@@ -317,6 +317,25 @@ Not done / not verified: bounded persistent worker A/B, human-labelled event
 recall, and endurance. See
 `artifacts/qa/S05/optimization/REPORT.md`. G5 remains **NOT VERIFIED**.
 
+## One-click & batch analysis (addendum)
+
+The Inspector AI panel now has a primary **"Phân tích thông minh"** action. The
+backend `POST /assets/{id}:analyze-auto` job verifies the source, reuses a valid
+S02 manifest or samples automatically, then runs Qwen3-VL with the chosen
+Smart/Balanced/Full mode. Existing valid analysis is skipped unless the source or
+mode changed. Per-frame cache/checkpoint and streaming commits are reused.
+
+Library batch actions create a persistent backend run over an explicit asset-ID
+snapshot (`current_clip` via auto endpoint; selected and entire project via
+`analysis-runs`). Entire-project runs query all asset IDs server-side, not just
+the loaded page. Runs use one heavy worker, Smart/Detailed defaults, skip valid
+results, and support pause/resume/cancel, restart reconciliation, and
+`waiting_for_memory`. Queue state and counts are stored in additive migration v6.
+
+Not changed: 23/54/23 Studio layout, notes/autosave, player, frozen V2/V3
+contracts, model/runtime, offline enforcement, one AI_HEAVY slot.
+G5 remains NOT VERIFIED; no S06/POV.
+
 ## Known limitations (S00–S05)
 
 - **G5 is NOT VERIFIED**, not failed: functional/native/security, 5,000-asset, live

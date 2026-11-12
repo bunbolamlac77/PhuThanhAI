@@ -31,6 +31,10 @@ from phuthanhai.api.schemas import (
     ReviewOut,
     ReviewUpdate,
     AnalysisSummary,
+    AnalysisRunCreate,
+    AnalysisRunItemOut,
+    AnalysisRunOut,
+    AnalyzeAutoRequest,
     AnalyzeRequest,
     JobOut,
     SampleRequest,
@@ -252,6 +256,20 @@ def start_sampling(asset_id: str, payload: SampleRequest, request: Request) -> J
     return JobOut.model_validate(_library(request).start_sampling(asset_id, payload.profile))
 
 
+@router.post("/assets/{asset_id}:analyze-auto", response_model=JobOut, status_code=202)
+def start_auto_analysis(asset_id: str, payload: AnalyzeAutoRequest, request: Request) -> JobOut:
+    return JobOut.model_validate(
+        _library(request).start_auto_analysis(
+            asset_id,
+            selection_mode=payload.selection_mode,
+            sampling_profile=payload.sampling_profile,
+            skip_existing=payload.skip_existing,
+            method=payload.method,
+            user_ranges=payload.user_ranges,
+        )
+    )
+
+
 @router.post("/assets/{asset_id}:analyze", response_model=JobOut, status_code=202)
 def start_analysis(asset_id: str, payload: AnalyzeRequest, request: Request) -> JobOut:
     return JobOut.model_validate(
@@ -354,6 +372,50 @@ def get_report_file(project_id: str, name: str, request: Request) -> Response:
 @router.get("/projects/{project_id}/jobs", response_model=list[JobOut])
 def list_jobs(project_id: str, request: Request) -> list[JobOut]:
     return [JobOut.model_validate(job) for job in _library(request).list_jobs(project_id)]
+
+
+@router.post("/projects/{project_id}/analysis-runs", response_model=AnalysisRunOut, status_code=202)
+def create_analysis_run(project_id: str, payload: AnalysisRunCreate, request: Request) -> AnalysisRunOut:
+    return AnalysisRunOut.model_validate(
+        _library(request).batch.create_run(
+            project_id,
+            asset_ids=payload.asset_ids,
+            selection_mode=payload.selection_mode,
+            sampling_profile=payload.sampling_profile,
+            skip_existing=payload.skip_existing,
+            idempotency_key=payload.idempotency_key,
+        )
+    )
+
+
+@router.get("/analysis-runs/{run_id}", response_model=AnalysisRunOut)
+def get_analysis_run(run_id: str, request: Request) -> AnalysisRunOut:
+    return AnalysisRunOut.model_validate(_library(request).batch.get_run(run_id))
+
+
+@router.get("/analysis-runs/{run_id}/items", response_model=list[AnalysisRunItemOut])
+def list_analysis_run_items(run_id: str, request: Request) -> list[AnalysisRunItemOut]:
+    return [AnalysisRunItemOut.model_validate(item) for item in _library(request).batch.list_items(run_id)]
+
+
+@router.post("/analysis-runs/{run_id}:pause", response_model=AnalysisRunOut)
+def pause_analysis_run(run_id: str, request: Request) -> AnalysisRunOut:
+    return AnalysisRunOut.model_validate(_library(request).batch.pause(run_id))
+
+
+@router.post("/analysis-runs/{run_id}:resume", response_model=AnalysisRunOut)
+def resume_analysis_run(run_id: str, request: Request) -> AnalysisRunOut:
+    return AnalysisRunOut.model_validate(_library(request).batch.resume(run_id))
+
+
+@router.post("/analysis-runs/{run_id}:retry-failed", response_model=AnalysisRunOut)
+def retry_failed_analysis_run(run_id: str, request: Request) -> AnalysisRunOut:
+    return AnalysisRunOut.model_validate(_library(request).batch.retry_failed(run_id))
+
+
+@router.post("/analysis-runs/{run_id}:cancel", response_model=AnalysisRunOut)
+def cancel_analysis_run(run_id: str, request: Request) -> AnalysisRunOut:
+    return AnalysisRunOut.model_validate(_library(request).batch.cancel(run_id))
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
