@@ -6,6 +6,7 @@ claims to replace that.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -13,10 +14,12 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import mock
 
-from phuthanhai.analyzer.vision_service import VisionError, VisionService
+from phuthanhai.analyzer import vision_service as vision_module
+from phuthanhai.analyzer.vision_service import VisionError, VisionService, runtime_versions
 from phuthanhai.analyzer.evidence import validate_evidence
 from phuthanhai.config import Settings
 from phuthanhai.library.service import LibraryService
@@ -105,6 +108,42 @@ class SuccessTests(BaseVisionCase):
         texts = [text for frame in evidence["frames"] for text in frame["observation"]["visible_text"]]
         self.assertTrue(any("IGNORE ALL PREVIOUS" in text for text in texts))
         self.assertTrue(self.source.is_file())
+
+    def test_load_evidence_rejects_swapped_asset_identity(self) -> None:
+        outcome = self.analyze("ok")
+        evidence_path = outcome.evidence_path
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        evidence["asset_id"] = "swapped-asset"
+        evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+        self.assertIsNone(self.vision.load_evidence(self.asset["asset_id"]))
+
+    def test_load_evidence_rejects_unsupported_schema(self) -> None:
+        outcome = self.analyze("ok")
+        evidence_path = outcome.evidence_path
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        evidence["schema_version"] = "999.0.0"
+        evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+        self.assertIsNone(self.vision.load_evidence(self.asset["asset_id"]))
+
+
+class RuntimeIdentityTests(unittest.TestCase):
+    def test_runtime_versions_preserves_target_interpreter_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            python = Path(tmp) / "target-python"
+            python.write_bytes(b"stub")
+            completed = SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"python": "9.8.7", "mlx": "1.0"}) + "\n",
+            )
+            with (
+                mock.patch.dict(vision_module._RUNTIME_CACHE, {}, clear=True),
+                mock.patch.object(vision_module.subprocess, "run", return_value=completed),
+            ):
+                versions = runtime_versions(python)
+
+        self.assertEqual(versions["python"], "9.8.7")
 
 
 class FailurePathTests(BaseVisionCase):
