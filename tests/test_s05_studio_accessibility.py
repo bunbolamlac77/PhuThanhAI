@@ -92,6 +92,13 @@ class NoteSwitchSafetyTests(unittest.TestCase):
         self.assertIn("return false", source)
 
 
+class ProjectFormAccessibilityTests(unittest.TestCase):
+    def test_project_text_inputs_have_accessible_names(self) -> None:
+        source = (WEB_SRC / "tabs" / "LibraryTab.tsx").read_text(encoding="utf-8")
+        self.assertIn('aria-label="Tên dự án mới"', source)
+        self.assertIn('aria-label="Thư mục footage của dự án"', source)
+
+
 class PovGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.source = (WEB_SRC / "App.tsx").read_text(encoding="utf-8")

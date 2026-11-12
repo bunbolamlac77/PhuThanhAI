@@ -791,12 +791,14 @@ export default function LibraryTab({ online, session }: Props) {
             <input
               type="text"
               placeholder="Tên dự án"
+              aria-label="Tên dự án mới"
               value={formName}
               onChange={(event) => setFormName(event.target.value)}
             />
             <input
               type="text"
               placeholder="/Users/…/footage"
+              aria-label="Thư mục footage của dự án"
               value={formPath}
               onChange={(event) => setFormPath(event.target.value)}
             />
