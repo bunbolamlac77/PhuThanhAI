@@ -213,6 +213,40 @@ class VisionSelectionIntegrationTests(unittest.TestCase):
         self.assertEqual(second.frame_cache_hits, first.selected_frames)
         self.assertEqual(second.selected_frames, first.selected_frames)
 
+    def test_exact_evidence_can_be_reused_without_inference(self) -> None:
+        vision = self.vision()
+        with mock.patch.dict(os.environ, {"FAKE_VLM_MODE": "ok"}):
+            vision.analyze(self.asset, Path(self.asset["path"]), selection_mode="smart")
+        refreshed = self.service.get_asset(self.asset["asset_id"])
+        reusable = vision.reusable_evidence(
+            refreshed, Path(refreshed["path"]), selection_mode="smart"
+        )
+        self.assertIsNotNone(reusable)
+
+    def test_changed_model_snapshot_invalidates_whole_evidence_reuse(self) -> None:
+        vision = self.vision()
+        with mock.patch.dict(os.environ, {"FAKE_VLM_MODE": "ok"}):
+            vision.analyze(self.asset, Path(self.asset["path"]), selection_mode="smart")
+        refreshed = self.service.get_asset(self.asset["asset_id"])
+        (self.model / "model.safetensors").write_bytes(b"STUB")
+        self.assertIsNone(
+            vision.reusable_evidence(refreshed, Path(refreshed["path"]), selection_mode="smart")
+        )
+
+    def test_changed_user_ranges_recompute_selection_before_reuse(self) -> None:
+        vision = self.vision()
+        with mock.patch.dict(os.environ, {"FAKE_VLM_MODE": "ok"}):
+            vision.analyze(self.asset, Path(self.asset["path"]), selection_mode="smart")
+        refreshed = self.service.get_asset(self.asset["asset_id"])
+        self.assertIsNone(
+            vision.reusable_evidence(
+                refreshed,
+                Path(refreshed["path"]),
+                selection_mode="smart",
+                user_ranges=[[800, 1000]],
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
