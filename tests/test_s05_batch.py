@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from phuthanhai.library.service import LibraryService
+from phuthanhai.library import store
 from tests.helpers import isolated_settings
 from tests.media_fixtures import get
 
@@ -204,6 +205,32 @@ class BatchQueueTests(BatchBase):
             )
         self.assertEqual(self.service.batch.get_run(run["run_id"])["status"], "cancelled")
         self.assertEqual(self.service.batch.list_items(run["run_id"])[0]["status"], "cancelled")
+
+    def test_batch_claim_checks_durable_single_clip_jobs(self) -> None:
+        asset_id = self.assets[0]["asset_id"]
+        with self.service.db.write() as conn:
+            store.create_job(
+                conn,
+                job_id="durable-single-job",
+                project_id=self.project["project_id"],
+                asset_id=asset_id,
+                kind="auto_analysis",
+            )
+        with mock.patch.object(self.service, "is_asset_busy", return_value=False):
+            with self.assertRaises(Exception) as ctx:
+                self.service.batch.create_run(self.project["project_id"], asset_ids=[asset_id])
+        self.assertEqual(getattr(ctx.exception, "code", None), "ASSET_ALREADY_RUNNING")
+
+    def test_single_clip_claim_checks_durable_batch_items(self) -> None:
+        asset_id = self.assets[0]["asset_id"]
+        with mock.patch.object(self.service.batch, "_start"):
+            self.service.batch.create_run(self.project["project_id"], asset_ids=[asset_id])
+        with mock.patch.object(self.service, "is_asset_busy", return_value=False), mock.patch.object(
+            self.service.batch, "is_asset_active", return_value=False
+        ), mock.patch.object(self.service._executor, "submit"):
+            with self.assertRaises(Exception) as ctx:
+                self.service.start_auto_analysis(asset_id)
+        self.assertEqual(getattr(ctx.exception, "code", None), "ASSET_ALREADY_CLAIMED")
 
 
 if __name__ == "__main__":
