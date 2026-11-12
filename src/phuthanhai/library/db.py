@@ -365,7 +365,11 @@ class Database:
         """
 
         version = int(self.connection().execute("PRAGMA user_version").fetchone()[0])
-        if version >= SCHEMA_VERSION:
+        if version > SCHEMA_VERSION:
+            raise MigrationError(
+                f"database schema v{version} is newer than supported v{SCHEMA_VERSION}"
+            )
+        if version == SCHEMA_VERSION:
             return version
         backup: Path | None = None
         if version > 0 and self.path.is_file():

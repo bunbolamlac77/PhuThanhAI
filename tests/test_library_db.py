@@ -6,9 +6,11 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from phuthanhai.library import store
-from phuthanhai.library.db import SCHEMA_VERSION, Database, natural_key
+from phuthanhai.library import db as db_module
+from phuthanhai.library.db import SCHEMA_VERSION, Database, MigrationError, natural_key
 
 
 class DatabaseTests(unittest.TestCase):
@@ -25,6 +27,84 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(self.db.migrate(), SCHEMA_VERSION)
         self.assertEqual(self.db.migrate(), SCHEMA_VERSION)
         self.assertEqual(self.db.schema_version(), SCHEMA_VERSION)
+
+    def test_future_schema_is_rejected(self) -> None:
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+
+        with self.assertRaises(MigrationError):
+            self.db.migrate()
+
+    def test_v6_to_v7_enforces_one_active_claim_per_asset(self) -> None:
+        with (
+            mock.patch.object(db_module, "SCHEMA_VERSION", 6),
+            mock.patch.object(db_module, "MIGRATIONS", db_module.MIGRATIONS[:6]),
+        ):
+            self.assertEqual(self.db.migrate(), 6)
+
+        project_id = "project-1"
+        asset_id = "asset-1"
+        now = "2026-11-12T00:00:00+00:00"
+        with self.db.write() as conn:
+            conn.execute(
+                "INSERT INTO projects(project_id,name,root_path,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (project_id, "Migration", "/tmp/migration", now, now),
+            )
+            store.upsert_asset(
+                conn,
+                asset_id=asset_id,
+                project_id=project_id,
+                path="/tmp/migration/clip.mp4",
+                filename="clip.mp4",
+                size_bytes=1,
+                mtime_ns=1,
+                dev=1,
+                ino=1,
+                duration_ms=1,
+                width=1,
+                height=1,
+                rotation=0,
+                fps_nominal=None,
+                codec="h264",
+                has_audio=False,
+                vfr_hint=False,
+                color_transfer=None,
+            )
+
+        self.assertEqual(self.db.migrate(), SCHEMA_VERSION)
+        self.assertEqual(self.db.migrate(), SCHEMA_VERSION)
+        with self.db.write() as conn:
+            for run_id in ("run-1", "run-2"):
+                conn.execute(
+                    "INSERT INTO analysis_runs(run_id,project_id,status,config_json,total_items,created_at,updated_at) "
+                    "VALUES (?,?,'queued','{}',1,?,?)",
+                    (run_id, project_id, now, now),
+                )
+            conn.execute(
+                "INSERT INTO analysis_run_items(item_id,run_id,project_id,asset_id,position,status,updated_at) "
+                "VALUES ('item-1','run-1',?,?,0,'running',?)",
+                (project_id, asset_id, now),
+            )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.db.write() as conn:
+                conn.execute(
+                    "INSERT INTO analysis_run_items(item_id,run_id,project_id,asset_id,position,status,updated_at) "
+                    "VALUES ('item-2','run-2',?,?,0,'waiting_for_memory',?)",
+                    (project_id, asset_id, now),
+                )
+
+        with self.db.write() as conn:
+            conn.execute("UPDATE analysis_run_items SET status='complete' WHERE item_id='item-1'")
+            conn.execute(
+                "INSERT INTO analysis_run_items(item_id,run_id,project_id,asset_id,position,status,updated_at) "
+                "VALUES ('item-2','run-2',?,?,0,'queued',?)",
+                (project_id, asset_id, now),
+            )
+
+        conn = self.db.connection()
+        self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_wal_mode_and_foreign_keys(self) -> None:
         self.db.migrate()
