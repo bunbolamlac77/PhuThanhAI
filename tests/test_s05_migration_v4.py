@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from phuthanhai.library import db as db_module
-from phuthanhai.library.db import Database, MigrationError
+from phuthanhai.library.db import SCHEMA_VERSION, Database, MigrationError
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -71,14 +71,14 @@ class RealMigrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_v4_to_v5_preserves_ids_notes_reviews_and_adds_general_profile(self) -> None:
+    def test_v4_to_current_preserves_ids_notes_reviews_and_adds_general_profile(self) -> None:
         ids = make_v4_database(self.path)
         with sqlite3.connect(self.path) as conn:
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 4)
 
         database = Database(self.path)
-        self.assertEqual(database.migrate(), 6)
-        self.assertEqual(database.migrate(), 6)  # idempotent
+        self.assertEqual(database.migrate(), SCHEMA_VERSION)
+        self.assertEqual(database.migrate(), SCHEMA_VERSION)  # idempotent
         with database.read() as conn:
             project = conn.execute("SELECT * FROM projects WHERE project_id=?", (ids["project_id"],)).fetchone()
             note = conn.execute("SELECT * FROM annotations WHERE annotation_id=?", (ids["annotation_id"],)).fetchone()
