@@ -14,6 +14,35 @@ RUN_ACTIVE = {"queued", "running", "paused", "waiting_for_memory"}
 ITEM_ACTIVE = {"queued", "running", "waiting_for_memory"}
 
 
+def aggregate_run_status(current_status: str, counts: dict[str, int]) -> str:
+    """Derive lifecycle status without confusing execution with coverage."""
+
+    if current_status == "cancelled":
+        return "cancelled"
+    if counts.get("waiting_for_memory", 0) or (
+        current_status == "waiting_for_memory" and counts.get("queued", 0)
+    ):
+        return "waiting_for_memory"
+    if current_status == "paused" and (
+        counts.get("queued", 0) or counts.get("running", 0)
+    ):
+        return "paused"
+    if counts.get("running", 0):
+        return "running"
+    if counts.get("queued", 0):
+        return "running" if current_status == "running" else "queued"
+
+    partial = counts.get("partial", 0)
+    failed = counts.get("failed", 0)
+    cancelled = counts.get("cancelled", 0)
+    successful = counts.get("complete", 0) + counts.get("skipped", 0)
+    if partial or cancelled or (failed and successful):
+        return "partial"
+    if failed:
+        return "failed"
+    return "complete"
+
+
 class BatchAnalysisService:
     def __init__(self, service: Any) -> None:
         self.service = service
@@ -122,6 +151,22 @@ class BatchAnalysisService:
             "skip_existing": skip_existing,
         }
         with self.db.write() as conn:
+            if idempotency_key:
+                existing = conn.execute(
+                    "SELECT run_id FROM analysis_runs WHERE project_id=? AND idempotency_key=?",
+                    (project_id, idempotency_key),
+                ).fetchone()
+                if existing:
+                    return self.get_run(str(existing[0]))
+            active = conn.execute(
+                f"SELECT asset_id FROM analysis_run_items WHERE asset_id IN ({','.join('?' for _ in ids)}) "
+                "AND status IN ('queued','running','waiting_for_memory') LIMIT 1",
+                tuple(ids),
+            ).fetchone()
+            if active:
+                raise store.StoreError(
+                    "ASSET_ALREADY_CLAIMED", "an asset is already in an active batch", status=409
+                )
             conn.execute(
                 "INSERT INTO analysis_runs(run_id, project_id, status, config_json, idempotency_key, "
                 "total_items, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -184,7 +229,7 @@ class BatchAnalysisService:
                         conn.execute(
                             "UPDATE analysis_run_items SET status=?, sampling_status=?, vision_status=?, "
                             "cache_reused=?, frames_selected=?, frames_committed=?, error_code=NULL, updated_at=? "
-                            "WHERE item_id=?",
+                            "WHERE item_id=? AND status='running'",
                             (
                                 "skipped" if result.get("skipped")
                                 else ("cancelled" if result.get("status") == "cancelled"
@@ -214,26 +259,32 @@ class BatchAnalysisService:
                         )
                 if cancel.is_set():
                     break
-            with self.db.read() as conn:
-                failed = conn.execute(
-                    "SELECT COUNT(*) FROM analysis_run_items WHERE run_id=? AND status='failed'", (run_id,)
-                ).fetchone()[0]
-                remaining = conn.execute(
-                    "SELECT COUNT(*) FROM analysis_run_items WHERE run_id=? AND status IN ('queued','running')",
-                    (run_id,),
-                ).fetchone()[0]
             if cancel.is_set():
                 self._update_run(run_id, status="cancelled")
-            elif remaining:
-                self._update_run(run_id, status="paused")
             else:
-                self._update_run(run_id, status="partial" if failed else "complete")
+                current = self.get_run(run_id)
+                self._update_run(
+                    run_id,
+                    status=aggregate_run_status(current["status"], current["counts"]),
+                )
 
     def _update_run(self, run_id: str, *, status: str, error_code: str | None = None) -> None:
+        allowed_from: dict[str, tuple[str, ...]] = {
+            "running": ("queued", "running"),
+            "waiting_for_memory": ("queued", "running", "waiting_for_memory"),
+            "paused": ("queued", "running", "waiting_for_memory", "paused"),
+            "queued": ("paused", "waiting_for_memory", "partial", "failed", "queued"),
+            "complete": ("queued", "running", "complete"),
+            "partial": ("queued", "running", "partial"),
+            "failed": ("queued", "running", "failed"),
+            "cancelled": ("queued", "running", "waiting_for_memory", "paused", "cancelled"),
+        }
+        sources = allowed_from[status]
         with self.db.write() as conn:
             conn.execute(
-                "UPDATE analysis_runs SET status=?, updated_at=? WHERE run_id=?",
-                (status, store.utc_now_iso(), run_id),
+                f"UPDATE analysis_runs SET status=?, updated_at=? WHERE run_id=? "
+                f"AND status IN ({','.join('?' for _ in sources)})",
+                (status, store.utc_now_iso(), run_id, *sources),
             )
 
     # -- controls --------------------------------------------------------- #
@@ -261,7 +312,7 @@ class BatchAnalysisService:
         with self.db.write() as conn:
             conn.execute(
                 "UPDATE analysis_run_items SET status='cancelled', updated_at=? "
-                "WHERE run_id=? AND status IN ('queued','waiting_for_memory')",
+                "WHERE run_id=? AND status IN ('queued','running','waiting_for_memory')",
                 (store.utc_now_iso(), run_id),
             )
         self._update_run(run_id, status="cancelled")

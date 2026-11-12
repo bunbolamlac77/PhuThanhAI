@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -264,7 +264,34 @@ CREATE INDEX IF NOT EXISTS idx_analysis_run_items_active ON analysis_run_items(a
 """)
 
 
-MIGRATIONS = (_migration_v1, _migration_v2, _migration_v3, _migration_v4, _migration_v5, _migration_v6)
+def _migration_v7(conn: sqlite3.Connection) -> None:
+    """S05 hardening: one active batch claim per asset, enforced by SQLite."""
+
+    duplicates = conn.execute(
+        "SELECT asset_id FROM analysis_run_items "
+        "WHERE status IN ('queued','running','waiting_for_memory') "
+        "GROUP BY asset_id HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if duplicates is not None:
+        raise sqlite3.IntegrityError(
+            f"duplicate active batch claim for asset {duplicates['asset_id']}"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_run_items_active_asset "
+        "ON analysis_run_items(asset_id) "
+        "WHERE status IN ('queued','running','waiting_for_memory')"
+    )
+
+
+MIGRATIONS = (
+    _migration_v1,
+    _migration_v2,
+    _migration_v3,
+    _migration_v4,
+    _migration_v5,
+    _migration_v6,
+    _migration_v7,
+)
 
 
 class MigrationError(RuntimeError):

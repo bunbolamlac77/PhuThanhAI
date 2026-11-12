@@ -36,6 +36,27 @@ from phuthanhai.library.preview import DEFAULT_CACHE_QUOTA_BYTES, PreviewService
 from phuthanhai.utils.fs import is_inside
 
 
+def sampling_satisfies(requested_profile: str, manifest: dict[str, Any]) -> bool:
+    """Return whether verified manifest coverage meets the requested profile."""
+
+    requested_gap = PROFILE_GAPS_MS.get(requested_profile)
+    if requested_gap is None:
+        return False
+    if manifest.get("manifest_version") != "s02-sampling-1.0.0":
+        return False
+    coverage = manifest.get("coverage") or {}
+    if manifest.get("coverage_status") != "sufficient" or coverage.get("status") != "sufficient":
+        return False
+    settings = manifest.get("settings") or {}
+    if not all(settings.get(key) is not None for key in ("max_edge", "quality", "max_scene_ms")):
+        return False
+    try:
+        observed_gap = int(manifest["observed_max_gap_ms"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return 0 <= observed_gap <= requested_gap
+
+
 class LibraryService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -789,9 +810,7 @@ class LibraryService:
             return False
         if manifest.get("source", {}).get("sha256") != sha256_file(path):
             return False
-        # Reuse any verified manifest for this source; only a new/missing cache
-        # is sampled with the requested profile.
-        return manifest.get("settings", {}).get("max_edge") is not None
+        return sampling_satisfies(profile, manifest)
 
     def auto_analyze_sync(
         self,
