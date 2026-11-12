@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -145,6 +146,29 @@ class HeavySlotTests(unittest.TestCase):
         for thread in threads:
             thread.join()
         self.assertEqual(len(winners), 1, f"more than one heavy owner: {winners}")
+
+    def test_lock_is_machine_wide_across_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "heavy.lock"
+            ready = Path(tmp) / "ready"
+            code = (
+                "import sys,time; from pathlib import Path; "
+                "from phuthanhai.runtime.scheduler import HeavySlot; "
+                "slot=HeavySlot(lock_path=Path(sys.argv[1])); slot.acquire('child'); "
+                "Path(sys.argv[2]).write_text('ready'); time.sleep(5)"
+            )
+            child = subprocess.Popen([sys.executable, "-c", code, str(lock_path), str(ready)])
+            try:
+                deadline = time.monotonic() + 3
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(ready.exists(), "child did not acquire the test slot")
+                contender = HeavySlot(lock_path=lock_path)
+                self.assertFalse(contender.try_acquire("parent"))
+            finally:
+                child.terminate()
+                child.wait(timeout=5)
+            self.assertTrue(HeavySlot(lock_path=lock_path).try_acquire("after-crash"))
 
 
 class ProcessRegistryTests(unittest.TestCase):
