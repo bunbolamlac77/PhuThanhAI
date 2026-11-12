@@ -902,6 +902,24 @@ class LibraryService:
             raise store.StoreError("ASSET_ALREADY_CLAIMED", "asset is queued in a batch analysis", status=409)
         job_id = str(uuid.uuid4())
         with self.db.write() as conn:
+            batch_claim = conn.execute(
+                "SELECT 1 FROM analysis_run_items WHERE asset_id=? "
+                "AND status IN ('queued','running','waiting_for_memory') LIMIT 1",
+                (asset_id,),
+            ).fetchone()
+            if batch_claim:
+                raise store.StoreError(
+                    "ASSET_ALREADY_CLAIMED", "asset is queued in a batch analysis", status=409
+                )
+            active_job = conn.execute(
+                "SELECT 1 FROM jobs WHERE asset_id=? "
+                "AND state IN ('queued','running','cancelling') LIMIT 1",
+                (asset_id,),
+            ).fetchone()
+            if active_job:
+                raise store.StoreError(
+                    "JOB_ALREADY_RUNNING", "an analysis is already running for this asset", status=409
+                )
             store.create_job(conn, job_id=job_id, project_id=asset["project_id"], asset_id=asset_id, kind="auto_analysis")
             store.set_analysis_state(
                 conn, asset_id, status="queued",

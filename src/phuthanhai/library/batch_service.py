@@ -167,6 +167,15 @@ class BatchAnalysisService:
                 raise store.StoreError(
                     "ASSET_ALREADY_CLAIMED", "an asset is already in an active batch", status=409
                 )
+            active_job = conn.execute(
+                f"SELECT asset_id FROM jobs WHERE asset_id IN ({','.join('?' for _ in ids)}) "
+                "AND state IN ('queued','running','cancelling') LIMIT 1",
+                tuple(ids),
+            ).fetchone()
+            if active_job:
+                raise store.StoreError(
+                    "ASSET_ALREADY_RUNNING", "an asset already has an active analysis job", status=409
+                )
             conn.execute(
                 "INSERT INTO analysis_runs(run_id, project_id, status, config_json, idempotency_key, "
                 "total_items, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
