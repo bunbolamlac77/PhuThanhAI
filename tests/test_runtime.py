@@ -176,15 +176,16 @@ class HeavySlotTests(unittest.TestCase):
 class ProcessRegistryTests(unittest.TestCase):
     def test_captures_stdout_stderr_and_rss(self) -> None:
         registry = ProcessRegistry()
-        capture = registry.run_captured(
-            [sys.executable, "-c", "import sys;print('out');print('err', file=sys.stderr)"],
-            timeout_s=30,
-        )
-        self.assertEqual(capture.returncode, 0)
-        self.assertIn("out", capture.stdout)
-        self.assertIn("err", capture.stderr)
-        self.assertIsNotNone(capture.peak_rss_bytes)
-        self.assertFalse(capture.timed_out)
+        for _ in range(5):
+            capture = registry.run_captured(
+                [sys.executable, "-c", "import sys;print('out');print('err', file=sys.stderr)"],
+                timeout_s=30,
+            )
+            self.assertEqual(capture.returncode, 0)
+            self.assertIn("out", capture.stdout)
+            self.assertIn("err", capture.stderr)
+            self.assertIsNotNone(capture.peak_rss_bytes)
+            self.assertFalse(capture.timed_out)
 
     def test_timeout_terminates_the_child(self) -> None:
         registry = ProcessRegistry()

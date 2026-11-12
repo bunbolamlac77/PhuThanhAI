@@ -214,10 +214,12 @@ class ProcessRegistry:
 
         def sample() -> None:
             nonlocal peak_rss
-            while popen.poll() is None:
+            while True:
                 value = _rss_bytes(popen.pid)
                 if value is not None and (peak_rss is None or value > peak_rss):
                     peak_rss = value
+                if popen.poll() is not None:
+                    break
                 time.sleep(poll_interval_s)
 
         sampler = threading.Thread(target=sample, name="rss-sampler", daemon=True)
