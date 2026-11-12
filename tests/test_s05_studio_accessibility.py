@@ -84,6 +84,14 @@ class BatchProgressTests(unittest.TestCase):
         self.assertIn("setBatch(runs[0] ?? null)", self.source)
 
 
+class NoteSwitchSafetyTests(unittest.TestCase):
+    def test_failed_flush_blocks_clip_switch_and_preserves_draft(self) -> None:
+        source = (WEB_SRC / "tabs" / "LibraryTab.tsx").read_text(encoding="utf-8")
+        self.assertIn("const saved = await flushNow()", source)
+        self.assertIn("if (!saved) return", source)
+        self.assertIn("return false", source)
+
+
 class PovGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.source = (WEB_SRC / "App.tsx").read_text(encoding="utf-8")
