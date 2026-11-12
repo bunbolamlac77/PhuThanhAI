@@ -477,7 +477,13 @@ def run(request: dict[str, Any]) -> int:
                 "method": "multi_frame",
                 "elapsed_s": round(time.monotonic() - infer_started, 3),
             }
-            emit({"type": "sequence_result", "job_id": request["job_id"], **sequence})
+            emit({
+                "type": "sequence_result",
+                "job_id": request["job_id"],
+                "asset_id": request["asset_id"],
+                "analysis_id": request["analysis_id"],
+                **sequence,
+            })
             frame_results = [
                 {**frame, "observation": None, "method": "multi_frame"} for frame in frames
             ]
@@ -500,7 +506,14 @@ def run(request: dict[str, Any]) -> int:
                     "generation_tokens": getattr(result, "generation_tokens", None),
                 }
                 frame_results.append({**frame, **frame_result})
-                emit({"type": "frame_result", "job_id": request["job_id"], **frame_result})
+                emit({
+                    "type": "frame_result",
+                    "job_id": request["job_id"],
+                    "asset_id": request["asset_id"],
+                    "analysis_id": request["analysis_id"],
+                    "sha256": frame["sha256"],
+                    **frame_result,
+                })
     except WorkerError as exc:
         emit(
             {

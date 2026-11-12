@@ -196,6 +196,7 @@ def model_identity(model_dir: Path) -> dict[str, Any]:
         "manifest_sha256": sha256_file(manifest) if manifest.is_file() else None,
         "config_sha256": sha256_file(config) if config.is_file() else None,
         "weights_bytes": weights.stat().st_size if weights.is_file() else 0,
+        "weights_sha256": sha256_file(weights) if weights.is_file() else None,
     }
 
 
@@ -502,6 +503,18 @@ class VisionService:
                     stop_event.set()
                     self._terminate(popen)
                     raise VisionError("WORKER_PROTOCOL_INVALID", "worker asset identity mismatch")
+                if event_type in {"frame_result", "sequence_result", "result"}:
+                    identities = {
+                        "job_id": request["job_id"],
+                        "asset_id": request["asset_id"],
+                        "analysis_id": request["analysis_id"],
+                    }
+                    if any(event.get(key) != value for key, value in identities.items()):
+                        stop_event.set()
+                        self._terminate(popen)
+                        raise VisionError(
+                            "WORKER_PROTOCOL_INVALID", "worker evidence identity missing or mismatched"
+                        )
                 if event_type == "frame_result":
                     frame_id = event.get("frame_id")
                     if frame_id not in expected:
@@ -509,15 +522,15 @@ class VisionService:
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", f"frame not in request: {frame_id}")
                     verified = expected[frame_id]
-                    if event.get("sha256") not in (None, verified.get("sha256")):
+                    if event.get("sha256") != verified.get("sha256"):
                         stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", "frame hash mismatch")
-                    if event.get("normalized_pts_ms") not in (None, int(verified["normalized_pts_ms"])):
+                    if event.get("normalized_pts_ms") != int(verified["normalized_pts_ms"]):
                         stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", "frame PTS mismatch")
-                    if event.get("scene_id") not in (None, verified["scene_id"]):
+                    if event.get("scene_id") != verified["scene_id"]:
                         stop_event.set()
                         self._terminate(popen)
                         raise VisionError("WORKER_PROTOCOL_INVALID", "frame scene mismatch")
@@ -1005,11 +1018,11 @@ class VisionService:
             if frame_id not in expected or frame_id in seen:
                 raise VisionError("WORKER_PROTOCOL_INVALID", f"unexpected/duplicate frame: {frame_id}")
             verified = expected[frame_id]
-            if entry.get("scene_id") not in (None, verified["scene_id"]):
+            if entry.get("scene_id") != verified["scene_id"]:
                 raise VisionError("WORKER_PROTOCOL_INVALID", "final frame scene mismatch")
-            if entry.get("normalized_pts_ms") not in (None, int(verified["normalized_pts_ms"])):
+            if entry.get("normalized_pts_ms") != int(verified["normalized_pts_ms"]):
                 raise VisionError("WORKER_PROTOCOL_INVALID", "final frame PTS mismatch")
-            if entry.get("sha256") not in (None, verified.get("sha256")):
+            if entry.get("sha256") != verified.get("sha256"):
                 raise VisionError("WORKER_PROTOCOL_INVALID", "final frame hash mismatch")
             seen.add(frame_id)
             results[frame_id] = {
