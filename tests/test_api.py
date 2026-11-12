@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import tempfile
+import uuid
 import unittest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from phuthanhai.api.app import create_app
+from phuthanhai.library.service import LibraryService
+from phuthanhai.library import store
 from phuthanhai.api.security import CAPABILITY_HEADER, CSP, _has_traversal
 from tests.helpers import isolated_settings
 
@@ -130,6 +133,36 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertTrue(path.is_file())
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(path.read_text(encoding="utf-8").strip(), str(self.app.state.pid))
+
+
+class StartupOwnershipTests(unittest.TestCase):
+    def test_app_construction_does_not_reconcile_before_instance_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            footage = root / "footage"
+            footage.mkdir()
+            with isolated_settings(root / "data") as settings:
+                service = LibraryService(settings)
+                project = service.create_project("startup", str(footage))
+                run_id = str(uuid.uuid4())
+                now = store.utc_now_iso()
+                with service.db.write() as conn:
+                    conn.execute(
+                        "INSERT INTO analysis_runs(run_id, project_id, status, config_json, "
+                        "total_items, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                        (run_id, project["project_id"], "running", "{}", 0, now, now),
+                    )
+                service.close()
+
+                app = create_app(settings, port=PORT + 1, capability="startup-capability")
+                with service.db.read() as conn:
+                    status = conn.execute(
+                        "SELECT status FROM analysis_runs WHERE run_id=?", (run_id,)
+                    ).fetchone()[0]
+                library = getattr(app.state, "library", None)
+                if library is not None:
+                    library.close()
+                self.assertEqual(status, "running")
 
 
 if __name__ == "__main__":
