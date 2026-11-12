@@ -111,6 +111,7 @@ def main() -> int:
             "frame_id": frame_id,
             "scene_id": frame["scene_id"],
             "normalized_pts_ms": frame["normalized_pts_ms"],
+            "sha256": frame["sha256"],
             "observation": obs,
             "method": "sequential_frames" if request.get("method") != "single_frame" else "single_frame",
             "elapsed_s": 0.01,

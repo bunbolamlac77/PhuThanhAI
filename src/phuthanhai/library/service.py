@@ -833,17 +833,6 @@ class LibraryService:
         asset, path = self.resolve_asset_file(asset_id)
         source_sha = sha256_file(path)
 
-        if skip_existing and asset.get("analysis_status") == "complete":
-            evidence = self.vision.load_evidence(asset_id) or {}
-            coverage = evidence.get("visual_coverage") or {}
-            if (evidence.get("source_sha256") == source_sha
-                    and coverage.get("mode") == selection_mode):
-                return {
-                    "asset_id": asset_id, "skipped": True,
-                    "reason": "valid_analysis_exists", "status": "complete",
-                    "frames_observed": len(evidence.get("frames") or []),
-                }
-
         sampling_reused = self._sampling_is_valid(asset, path, sampling_profile)
         if not sampling_reused:
             def sampling_progress(payload: dict[str, Any]) -> None:
@@ -860,6 +849,23 @@ class LibraryService:
         else:
             if progress is not None:
                 progress({"stage": "sampling:cached", "fraction": 0.45, "done": 1, "total": 1})
+
+        if skip_existing:
+            evidence = self.vision.reusable_evidence(
+                asset,
+                path,
+                method=method,
+                selection_mode=selection_mode,
+                user_ranges=user_ranges,
+            )
+            if evidence is not None:
+                return {
+                    "asset_id": asset_id,
+                    "skipped": True,
+                    "reason": "valid_analysis_exists",
+                    "status": "complete",
+                    "frames_observed": len(evidence.get("frames") or []),
+                }
 
         def vision_progress(payload: dict[str, Any]) -> None:
             if progress is not None:

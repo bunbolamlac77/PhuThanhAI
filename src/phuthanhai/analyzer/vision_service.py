@@ -343,6 +343,81 @@ class VisionService:
         except subprocess.TimeoutExpired as exc:
             raise VisionError("WORKER_ORPHAN_REAP_FAILED", "worker survived SIGKILL") from exc
 
+    def reusable_evidence(
+        self,
+        asset: dict[str, Any],
+        source_path: Path,
+        *,
+        method: str = "auto",
+        selection_mode: str = "full",
+        user_ranges: list[list[int]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Load evidence only when every inference-affecting input still matches."""
+
+        if asset.get("analysis_status") != "complete":
+            return None
+        sampling_fingerprint = asset.get("sampling_fingerprint")
+        analysis_fingerprint = asset.get("analysis_fingerprint")
+        if not sampling_fingerprint or not analysis_fingerprint:
+            return None
+        manifest = self.sampling.load_manifest(asset["asset_id"], sampling_fingerprint)
+        if not manifest:
+            return None
+        try:
+            source_sha = sha256_file(source_path)
+            if source_sha != manifest.get("source", {}).get("sha256"):
+                return None
+            selection = build_selection(manifest, selection_mode, user_ranges=user_ranges)
+            selected_ids = set(selection["frame_ids"])
+            frame_refs = [
+                frame for frame in manifest.get("frames", []) if frame.get("frame_id") in selected_ids
+            ]
+            if not frame_refs:
+                return None
+            resolved_method = method
+            if resolved_method == "auto":
+                resolved_method = "single_frame" if len(frame_refs) == 1 else "sequential_frames"
+            if resolved_method == "multi_frame" and not self.allow_multi_frame:
+                resolved_method = "sequential_frames"
+            if resolved_method == "single_frame" and len(frame_refs) > 1:
+                resolved_method = "sequential_frames"
+            model = model_identity(self.model_path)
+            runtime = runtime_versions(self.runtime_python)
+            prompt_version = vlm_worker.PROMPT_VERSION
+            expected_fingerprint = inference_fingerprint(
+                source_sha256=source_sha,
+                sampling_fingerprint=sampling_fingerprint,
+                frame_hashes=[[frame["frame_id"], frame["sha256"]] for frame in frame_refs],
+                model=model,
+                runtime=runtime,
+                prompt_version=prompt_version,
+                method=resolved_method,
+                batch_size=self.batch_size,
+                max_tokens=320,
+                temperature=0.0,
+                selection={"mode": selection_mode, "frame_ids": selection["frame_ids"]},
+            )
+            if analysis_fingerprint != expected_fingerprint:
+                return None
+            path = self._cache_dir(asset["asset_id"], expected_fingerprint) / "visual_evidence.json"
+            evidence = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                evidence.get("asset_id") != asset["asset_id"]
+                or evidence.get("source_sha256") != source_sha
+                or evidence.get("sampling_fingerprint") != sampling_fingerprint
+                or evidence.get("analysis_method") != resolved_method
+                or evidence.get("prompt_version") != prompt_version
+                or evidence.get("model_identity") != model
+                or evidence.get("runtime_versions") != runtime
+                or evidence.get("execution_status") != "complete"
+                or (evidence.get("visual_coverage") or {}).get("mode") != selection_mode
+            ):
+                return None
+            validate_evidence(evidence, frame_refs)
+            return evidence
+        except (EvidenceError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
     def _run_worker(
         self,
         request: dict[str, Any],
